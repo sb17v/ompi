@@ -121,6 +121,7 @@ static int pack_local_mkeys(pmix_data_buffer_t *msg, int pe, int seg)
 
 static void memheap_attach_segment(sshmem_mkey_t *mkey, int tr_id)
 {
+    map_segment_t *s;
     /* process special case when va was got using sshmem
      * this case is notable for:
      * - key is set as (seg_id);
@@ -135,7 +136,9 @@ static void memheap_attach_segment(sshmem_mkey_t *mkey, int tr_id)
             tr_id,
             mkey->va_base, mkey->len, (unsigned long long)mkey->u.key);
 
-    mca_sshmem_segment_attach(&(memheap_map->mem_segs[HEAP_SEG_INDEX]), mkey);
+    s = mca_memheap_base_segment_get(memheap_map, HEAP_SEG_INDEX);
+    assert(NULL != s);
+    mca_sshmem_segment_attach(s, mkey);
 
     if ((void *) -1 == (void *) mkey->va_base) {
         MEMHEAP_ERROR("tr_id: %d key %llx attach failed: errno = %d",
@@ -649,9 +652,9 @@ void mca_memheap_modex_recv_all(void)
         msg->unpack_ptr = (void *)((intptr_t) msg->base_ptr + rcv_offsets[i]);
 
         for (j = 0; j < memheap_map->n_segments; j++) {
-            map_segment_t *s;
+            map_segment_t *s = mca_memheap_base_segment_get(memheap_map, j);
+            assert(NULL != s);
 
-            s = &memheap_map->mem_segs[j];
             if (NULL != s->mkeys_cache[i]) {
                 MEMHEAP_VERBOSE(10, "PE%d: segment%d already exists, mkey will be replaced", i, j);
             } else {
@@ -705,8 +708,13 @@ sshmem_mkey_t * mca_memheap_base_get_cached_mkey_slow(shmem_ctx_t ctx,
 {
     int rc;
     sshmem_mkey_t *mkey;
+    int index = mca_memheap_base_segment_idx(memheap_map, s);
 
     if (!memheap_oob.is_inited) {
+        return NULL;
+    }
+
+    if (0 > index) {
         return NULL;
     }
 
@@ -715,9 +723,7 @@ sshmem_mkey_t * mca_memheap_base_get_cached_mkey_slow(shmem_ctx_t ctx,
     if (!s->mkeys_cache[pe])
         return NULL ;
 
-    rc = memheap_oob_get_mkeys(ctx, pe,
-                               s - memheap_map->mem_segs,
-                               s->mkeys_cache[pe]);
+    rc = memheap_oob_get_mkeys(ctx, pe, index, s->mkeys_cache[pe]);
     if (OSHMEM_SUCCESS != rc)
         return NULL ;
 
