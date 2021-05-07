@@ -360,8 +360,9 @@ int mca_spml_ucx_add_procs(ompi_proc_t** procs, size_t nprocs)
         OSHMEM_PROC_DATA(procs[i])->num_transports = 1;
         OSHMEM_PROC_DATA(procs[i])->transport_ids = spml_ucx_transport_ids;
 
+        /* !!! */
         for (j = 0; j < MCA_MEMHEAP_MAX_SEGMENTS; j++) {
-            mca_spml_ucx_ctx_default.ucp_peers[i].mkeys[j].key.rkey = NULL;
+            mca_spml_ucx_ctx_default.ucp_peers[i].mkeys = NULL;
         }
     }
 
@@ -451,6 +452,10 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     ucs_status_t err;
     
+
+    if(ucx_ctx->ucp_peers[pe].size < segno) {
+       realloc();
+    }
     ucx_mkey = &ucx_ctx->ucp_peers[pe].mkeys[segno].key;
 
     err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
