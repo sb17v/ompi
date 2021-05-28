@@ -770,16 +770,17 @@ int mca_memheap_base_detect_addr_type(void* va)
     return addr_type;
 }
 
-void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno)
+void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno, void *ucx_ctx)
 {
     map_segment_t *s;
-
     if (segno >= MCA_MEMHEAP_MAX_SEGMENTS) {
         return;
     }
 
     s = memheap_find_seg(segno);
     assert(NULL != s);
+    s->seg_context.ucx_mkey_context = ucx_ctx;
+    s->seg_id                        = segno;
 
     seg->super.va_base = s->super.va_base;
     seg->super.va_end  = s->super.va_end;
