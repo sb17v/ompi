@@ -80,10 +80,11 @@ static int _dereg_segment(map_segment_t *s)
     nprocs = oshmem_num_procs();
     my_pe = oshmem_my_proc_id();
 
-    MCA_SPML_CALL(deregister(s->mkeys));
+    MCA_SPML_CALL(deregister(s->mkeys)); // Remove rmkey_free in deregister
 
     if (s->mkeys_cache) {
         for (j = 0; j < nprocs; j++) {
+            /* TODO: remove ths line */
             if (j == my_pe)
                 continue;
             if (s->mkeys_cache[j]) {
