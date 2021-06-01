@@ -127,15 +127,12 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 }
 
 /* Release the memkey map from a ucp_peer if it has any element in memkey */
-void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int index)
+void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer)
 {
     if (ucp_peer->mkeys_cnt)
     {
-        free(&ucp_peer->mkeys[index]);
-        if (ucp_peer->mkeys_cnt == 1) {
-            ucp_peer->mkeys = NULL;
-        }
-        ucp_peer->mkeys_cnt -= 1;
+        free(ucp_peer->mkeys);
+        ucp_peer->mkeys = NULL;
     } 
     
 }
@@ -164,6 +161,8 @@ int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
 
         /* mark peer as disconnected */
         mca_spml_ucx_ctx_default.ucp_peers[i].ucp_conn = NULL;
+        /* release the mkey addresses */
+        mca_spml_ucx_ep_mkey_release(&mca_spml_ucx_ctx_default.ucp_peers[i]);
     }
 
     ret = opal_common_ucx_del_procs_nofence(del_procs, nprocs, oshmem_my_proc_id(),

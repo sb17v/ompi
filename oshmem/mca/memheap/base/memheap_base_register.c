@@ -100,7 +100,6 @@ static int _dereg_segment(map_segment_t *s)
         free(s->mkeys_cache);
         s->mkeys_cache = NULL;
     }
-
     MAP_SEGMENT_INVALIDATE(s);
 
     return rc;

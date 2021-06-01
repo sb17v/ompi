@@ -205,7 +205,7 @@ void mca_spml_ucx_async_cb(int fd, short event, void *cbdata);
 int mca_spml_ucx_init_put_op_mask(mca_spml_ucx_ctx_t *ctx, size_t nprocs);
 int mca_spml_ucx_clear_put_op_mask(mca_spml_ucx_ctx_t *ctx);
 int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index);
-void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int index);
+void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer);
 
 static inline spml_ucx_cached_mkey_t *
 mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index)
@@ -257,11 +257,11 @@ mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_uc
     spml_ucx_cached_mkey_t *mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     ucp_peer_t *peer;
-    size_t mkey_cnt;
+    size_t mkeys_cnt;
 
-    peer = ucx_ctx->ucp_peers[pe]
-    mkey = peer.mkeys;
-    mkey_cnt = peer->mkeys_cnt;
+    peer = &(ucx_ctx->ucp_peers[pe]);
+    mkey = peer->mkeys;
+    mkeys_cnt = peer->mkeys_cnt;
     mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, mkeys_cnt, sizeof(*mkey), va);
     assert(mkey != NULL);
     *rva = map_segment_va2rva(&mkey->super, va);
