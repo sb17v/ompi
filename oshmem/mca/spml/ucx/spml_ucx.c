@@ -106,21 +106,20 @@ int mca_spml_ucx_enable(bool enable)
 int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 {
     int old_size = ucp_peer->mkeys_cnt;
-    if (MCA_MEMHEAP_MAX_SEGMENTS <= ucp_peer->mkeys_cnt)
-    {
+    if (MCA_MEMHEAP_MAX_SEGMENTS <= ucp_peer->mkeys_cnt) {
         SPML_UCX_ERROR("Failed to get new mkey for segment: max number (%d) of segment descriptor is exhausted",
                        MCA_MEMHEAP_MAX_SEGMENTS);
         return OSHMEM_ERROR;
     }
     ucp_peer->mkeys_cnt = index + 1;
     ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(spml_ucx_cached_mkey_t) * ucp_peer->mkeys_cnt);
+    memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size));
     /* NOTE: release code checks for the rkey != NULL as a sign of used element:
-        Account for the following scenario: |MKEY1|00000|MKEY2|??????|NEW-MKEY|
+        Account for the following scenario below by zero'ing the unused elements:
+        |MKEY1|00000|MKEY2|??????|NEW-MKEY|
                                             |<--- ols_size -->|
     */
-    memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size));
-    if (NULL == ucp_peer->mkeys)
-    {
+    if (NULL == ucp_peer->mkeys) {
         SPML_UCX_ERROR("Failed to obtain new mkey: OOM - failed to expand the descriptor buffer");
         return OSHMEM_ERR_OUT_OF_RESOURCE;
     }
