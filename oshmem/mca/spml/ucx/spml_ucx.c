@@ -129,8 +129,7 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 /* Release the memkey map from a ucp_peer if it has any element in memkey */
 void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer)
 {
-    if (ucp_peer->mkeys_cnt)
-    {
+    if (ucp_peer->mkeys_cnt) {
         free(ucp_peer->mkeys);
         ucp_peer->mkeys = NULL;
     } 
