@@ -256,9 +256,13 @@ mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_uc
 {
     spml_ucx_cached_mkey_t *mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
+    ucp_peer_t *peer;
+    size_t mkey_cnt;
 
-    mkey = ucx_ctx->ucp_peers[pe].mkeys;
-    mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, sizeof(*mkey), va);
+    peer = ucx_ctx->ucp_peers[pe]
+    mkey = peer.mkeys;
+    mkey_cnt = peer->mkeys_cnt;
+    mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, mkeys_cnt, sizeof(*mkey), va);
     assert(mkey != NULL);
     *rva = map_segment_va2rva(&mkey->super, va);
     return &mkey->key;
