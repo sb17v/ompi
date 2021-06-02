@@ -80,15 +80,16 @@ static int _dereg_segment(map_segment_t *s)
     nprocs = oshmem_num_procs();
     my_pe = oshmem_my_proc_id();
 
-    MCA_SPML_CALL(deregister(s->mkeys));
+    MCA_SPML_CALL(deregister(s->mkeys)); // Remove rmkey_free in deregister
 
     if (s->mkeys_cache) {
         for (j = 0; j < nprocs; j++) {
+            /* TODO: remove ths line */
             if (j == my_pe)
                 continue;
             if (s->mkeys_cache[j]) {
                 if (s->mkeys_cache[j]->len) {
-                    MCA_SPML_CALL(rmkey_free(s->mkeys_cache[j]));
+                    MCA_SPML_CALL(rmkey_free(s->mkeys_cache[j], j));
                     free(s->mkeys_cache[j]->u.data);
                     s->mkeys_cache[j]->len = 0;
                 }
@@ -99,7 +100,6 @@ static int _dereg_segment(map_segment_t *s)
         free(s->mkeys_cache);
         s->mkeys_cache = NULL;
     }
-
     MAP_SEGMENT_INVALIDATE(s);
 
     return rc;

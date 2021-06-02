@@ -94,7 +94,7 @@ typedef struct sshmem_mkey {
         void *data;
         uint64_t key;
     } u;
-    void *spml_context;       /* spml module can attach internal structures here */
+    // void *spml_context;       /* spml module can attach internal structures here */
 } sshmem_mkey_t;
 
 typedef struct map_base_segment {
@@ -108,6 +108,10 @@ typedef struct mkey_segment {
 } mkey_segment_t;
 
 typedef struct segment_allocator segment_allocator_t;
+typedef struct segment_context{
+    void *context;
+    void *ucx_mkey_context;
+} segment_context_t;
 
 typedef struct map_segment {
     map_base_segment_t   super;
@@ -118,7 +122,7 @@ typedef struct map_segment {
     size_t               seg_size;       /* length of the segment */
     segment_type_t       type;           /* type of the segment */
     long                 alloc_hints;    /* allocation hints this segment supports */
-    void                *context;        /* allocator can use this field to store
+    segment_context_t    seg_context;        /* allocator can use this field to store
                                             its own private data */
     segment_allocator_t *allocator;      /* segment-specific allocator */
 } map_segment_t;

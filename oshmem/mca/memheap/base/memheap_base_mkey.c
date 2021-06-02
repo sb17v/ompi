@@ -639,21 +639,15 @@ void mca_memheap_modex_recv_all(void)
 
     OPAL_TIMING_ENV_NEXT(recv_all, "Perform mkey exchange");
 
-    opal_dss.load(msg, rcv_buffer, buffer_size);
-
     /* deserialize mkeys */
     OPAL_THREAD_LOCK(&memheap_oob.lck);
     for (i = 0; i < nprocs; i++) {
-        if (i == my_pe) {
-            continue;
-        }
-
-        msg->unpack_ptr = (void *)((intptr_t) msg->base_ptr + rcv_offsets[i]);
+        opal_dss.load(msg, (void *)((intptr_t) msg->base_ptr + rcv_offsets[i],  rcv_size[i]);
 
         for (j = 0; j < memheap_map->n_segments; j++) {
-            map_segment_t *s = mca_memheap_base_segment_get(memheap_map, j);
-            assert(NULL != s);
+            map_segment_t *s;
 
+            s = &memheap_map->mem_segs[j];
             if (NULL != s->mkeys_cache[i]) {
                 MEMHEAP_VERBOSE(10, "PE%d: segment%d already exists, mkey will be replaced", i, j);
             } else {
@@ -668,8 +662,12 @@ void mca_memheap_modex_recv_all(void)
             memheap_oob.segno = j;
             unpack_remote_mkeys(oshmem_ctx_default, msg, i);
         }
+
+        /* Protect the incoming data */
+        msg->base_ptr = NULL;
     }
 
+    OBJ_RELEASE(msg);
     OPAL_TIMING_ENV_NEXT(recv_all, "Unpack data");
 
     OPAL_THREAD_UNLOCK(&memheap_oob.lck);
@@ -770,16 +768,17 @@ int mca_memheap_base_detect_addr_type(void* va)
     return addr_type;
 }
 
-void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno)
+void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno, void *ucx_ctx)
 {
     map_segment_t *s;
-
     if (segno >= MCA_MEMHEAP_MAX_SEGMENTS) {
         return;
     }
 
     s = memheap_find_seg(segno);
     assert(NULL != s);
+    s->seg_context.ucx_mkey_context = ucx_ctx;
+    s->seg_id                        = segno;
 
     seg->super.va_base = s->super.va_base;
     seg->super.va_end  = s->super.va_end;

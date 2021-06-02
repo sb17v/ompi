@@ -244,7 +244,7 @@ static inline map_base_segment_t *map_segment_find_va(map_base_segment_t *segs,
     return NULL;
 }
 
-void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno);
+void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno, void *ucx_mkey_ctx);
 
 static inline map_segment_t *memheap_find_va(void* va)
 {

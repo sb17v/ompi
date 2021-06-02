@@ -156,13 +156,13 @@ segment_create_internal(map_segment_t *ds_buf, void *address, size_t size,
         goto out;
     }
 
-    ds_buf->seg_size      = size;
-    ds_buf->super.va_end  = (void*)((uintptr_t)ds_buf->super.va_base + ds_buf->seg_size);
-    ds_buf->context       = ctx;
-    ds_buf->type          = MAP_SEGMENT_ALLOC_UCX;
-    ds_buf->alloc_hints   = hint;
-    ctx->ucp_memh         = mem_h;
-    ctx->dev_mem          = dev_mem;
+    ds_buf->seg_size                   = size;
+    ds_buf->super.va_end               = (void*)((uintptr_t)ds_buf->super.va_base + ds_buf->seg_size);
+    ds_buf->seg_context.context       = ctx;
+    ds_buf->type                       = MAP_SEGMENT_ALLOC_UCX;
+    ds_buf->alloc_hints                = hint;
+    ctx->ucp_memh                      = mem_h;
+    ctx->dev_mem                       = dev_mem;
     if (hint) {
         ds_buf->allocator = &sshmem_ucx_allocator;
     }
@@ -294,7 +294,7 @@ static int
 segment_unlink(map_segment_t *ds_buf)
 {
     mca_spml_ucx_t *spml = (mca_spml_ucx_t *)mca_spml.self;
-    mca_sshmem_ucx_segment_context_t *ctx = ds_buf->context;
+    mca_sshmem_ucx_segment_context_t *ctx = ds_buf->seg_context.context;
 
     if (ctx->shadow_allocator) {
         sshmem_ucx_shadow_destroy(ctx->shadow_allocator);
@@ -308,7 +308,7 @@ segment_unlink(map_segment_t *ds_buf)
     }
 #endif
 
-    ds_buf->context = NULL;
+    ds_buf->seg_context.context = NULL;
     free(ctx);
 
     OPAL_OUTPUT_VERBOSE(
@@ -352,7 +352,7 @@ static void sshmem_ucx_memheap_wordcopy(void *dst, void *src, size_t size)
 static int sshmem_ucx_memheap_realloc(map_segment_t *s, size_t size,
                                       void* old_ptr, void** new_ptr)
 {
-    mca_sshmem_ucx_segment_context_t *ctx = s->context;
+    mca_sshmem_ucx_segment_context_t *ctx = s->seg_context.context;
     unsigned alloc_count, index, old_index, old_alloc_count;
     int res;
     int inplace;
@@ -400,7 +400,7 @@ static int sshmem_ucx_memheap_realloc(map_segment_t *s, size_t size,
 
 static int sshmem_ucx_memheap_free(map_segment_t *s, void* ptr)
 {
-    mca_sshmem_ucx_segment_context_t *ctx = s->context;
+    mca_sshmem_ucx_segment_context_t *ctx = s->seg_context.context;
 
     if (!ptr) {
         return OSHMEM_SUCCESS;

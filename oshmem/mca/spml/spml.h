@@ -149,8 +149,9 @@ typedef void * (*mca_spml_base_module_mkey_ptr_fn_t)(const void *dst_addr, sshme
  * free resources used by deserialized remote mkey
  *
  * @param mkey remote mkey
+ * @param pe   remote PE
  */
-typedef void (*mca_spml_base_module_mkey_free_fn_t)(sshmem_mkey_t *);
+typedef void (*mca_spml_base_module_mkey_free_fn_t)(sshmem_mkey_t *, int pe);
 
 /**
  * Register (Pinn) a buffer of 'size' bits starting in address addr
