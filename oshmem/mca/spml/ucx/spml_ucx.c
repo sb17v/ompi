@@ -104,6 +104,48 @@ int mca_spml_ucx_enable(bool enable)
     return OSHMEM_SUCCESS;
 }
 
+/* add a new mkey and update update the mkeys_cnt */
+int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
+{
+    int old_size = ucp_peer->mkeys_cnt;
+    if (MCA_MEMHEAP_MAX_SEGMENTS <= ucp_peer->mkeys_cnt) {
+        SPML_UCX_ERROR("Failed to get new mkey for segment: max number (%d) of segment descriptor is exhausted",
+                       MCA_MEMHEAP_MAX_SEGMENTS);
+        return OSHMEM_ERROR;
+    }
+    ucp_peer->mkeys_cnt = index + 1;
+    /* Allocate an area for spml_ucx_cached_mkey_t */
+    spml_ucx_cached_mkey_t *ucx_cached_mkey = (spml_ucx_cached_mkey_t *) malloc(sizeof(spml_ucx_cached_mkey_t));
+    if (NULL == ucx_cached_mkey) {
+        SPML_UCX_ERROR("Failed to obtain new ucx_cached_mkey: OOM - failed to expand the descriptor buffer");
+        return OSHMEM_ERR_OUT_OF_RESOURCE;
+    }
+    /* Allocate an array to hold the pointers to the ucx_cached_mkey */
+    ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(spml_ucx_cached_mkey_t *) * ucp_peer->mkeys_cnt);
+    if (NULL == ucp_peer->mkeys) {
+        SPML_UCX_ERROR("Failed to obtain new mkey: OOM - failed to expand the descriptor buffer");
+        return OSHMEM_ERR_OUT_OF_RESOURCE;
+    }
+    /* NOTE: release code checks for the rkey != NULL as a sign of used element:
+        Account for the following scenario below by zero'ing the unused elements:
+        |MKEY1|00000|MKEY2|??????|NEW-MKEY|
+        |<--- old_size -->|
+    */
+    memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size) * sizeof(spml_ucx_cached_mkey_t *));
+    ucp_peer->mkeys[index] = ucx_cached_mkey;
+    return OSHMEM_SUCCESS;
+}
+
+/* Release the memkey map from a ucp_peer if it has any element in memkey */
+void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer)
+{
+    if (ucp_peer->mkeys_cnt) {
+        free(ucp_peer->mkeys);
+        ucp_peer->mkeys = NULL;
+    } 
+    
+}
+
 int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
 {
     size_t ucp_workers = mca_spml_ucx.ucp_workers;
@@ -128,6 +170,8 @@ int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
 
         /* mark peer as disconnected */
         mca_spml_ucx_ctx_default.ucp_peers[i].ucp_conn = NULL;
+        /* release the cached_ep_mkey buffer */
+        mca_spml_ucx_ep_mkey_release(&(mca_spml_ucx_ctx_default.ucp_peers[i]));
     }
 
     ret = opal_common_ucx_del_procs_nofence(del_procs, nprocs, oshmem_my_proc_id(),
@@ -362,9 +406,9 @@ int mca_spml_ucx_add_procs(ompi_proc_t** procs, size_t nprocs)
         OSHMEM_PROC_DATA(procs[i])->num_transports = 1;
         OSHMEM_PROC_DATA(procs[i])->transport_ids = spml_ucx_transport_ids;
 
-        for (j = 0; j < MCA_MEMHEAP_MAX_SEGMENTS; j++) {
-            mca_spml_ucx_ctx_default.ucp_peers[i].mkeys[j].key.rkey = NULL;
-        }
+        /* Initialize mkeys as NULL for all processes */
+        mca_spml_ucx_ctx_default.ucp_peers[i].mkeys = NULL;
+        mca_spml_ucx_ctx_default.ucp_peers[i].mkeys_cnt = 0;
     }
 
     for (i = 0; i < mca_spml_ucx.ucp_workers; i++) {
@@ -452,8 +496,12 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     spml_ucx_mkey_t   *ucx_mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     ucs_status_t err;
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
     
-    ucx_mkey = &ucx_ctx->ucp_peers[pe].mkeys[segno].key;
+    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
+    ucx_cached_mkey = mca_spml_ucx_ep_mkey_get(ucp_peer, segno);
+    ucx_mkey = &(*ucx_cached_mkey).key;
 
     err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
             mkey->u.data,
@@ -480,13 +528,17 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     spml_ucx_mkey_t *ucx_mkey;
     ucp_mem_advise_params_t params;
     ucs_status_t status;
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
 
     if (!(mca_spml_ucx.heap_reg_nb && memheap_is_va_in_segment(addr, HEAP_SEG_INDEX))) {
         return;
     }
 
     my_pe    = oshmem_my_proc_id();
-    ucx_mkey = &mca_spml_ucx_ctx_default.ucp_peers[my_pe].mkeys[HEAP_SEG_INDEX].key;
+    ucp_peer = &(mca_spml_ucx_ctx_default.ucp_peers[my_pe]);
+    ucx_cached_mkey = mca_spml_ucx_ep_mkey_get(ucp_peer, HEAP_SEG_INDEX);
+    ucx_mkey = &(ucx_cached_mkey->key);
 
     params.field_mask = UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS |
                         UCP_MEM_ADVISE_PARAM_FIELD_LENGTH |
@@ -517,6 +569,8 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     map_segment_t *mem_seg;
     unsigned flags;
     int my_pe = oshmem_my_proc_id();
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
 
     *count = 0;
     mkeys = (sshmem_mkey_t *) calloc(1, sizeof(*mkeys));
@@ -527,7 +581,9 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     segno   = memheap_find_segnum(addr);
     mem_seg = memheap_find_seg(segno);
 
-    ucx_mkey = &mca_spml_ucx_ctx_default.ucp_peers[my_pe].mkeys[segno].key;
+    ucp_peer = &(mca_spml_ucx_ctx_default.ucp_peers[my_pe]);
+    ucx_cached_mkey = mca_spml_ucx_ep_mkey_get(ucp_peer, segno);
+    ucx_mkey = &(ucx_cached_mkey->key);
     mkeys[0].spml_context = ucx_mkey;
 
     /* if possible use mem handle already created by ucx allocator */
@@ -713,7 +769,10 @@ static int mca_spml_ucx_ctx_create_common(long options, mca_spml_ucx_ctx_t **ucx
 
         for (j = 0; j < memheap_map->n_segments; j++) {
             mkey = &memheap_map->mem_segs[j].mkeys_cache[i][0];
-            ucx_mkey = &ucx_ctx->ucp_peers[i].mkeys[j].key;
+            ucp_peer_t *ucp_peer = &(ucx_ctx->ucp_peers[i]);
+            spml_ucx_cached_mkey_t *ucx_cached_mkey = mca_spml_ucx_ep_mkey_get(ucp_peer, j);
+            ucx_mkey = &(ucx_cached_mkey->key);
+
             if (mkey->u.data) {
                 err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[i].ucp_conn,
                                          mkey->u.data,
@@ -1041,7 +1100,7 @@ int mca_spml_ucx_quiet(shmem_ctx_t ctx)
         for (i = 0; i < ucx_ctx->put_proc_count; i++) {
             idx = ucx_ctx->put_proc_indexes[i];
             ret = mca_spml_ucx_get_nb(ctx,
-                                      ucx_ctx->ucp_peers[idx].mkeys->super.super.va_base,
+                                      ucx_ctx->ucp_peers[idx].mkeys[0]->super.super.va_base,
                                       sizeof(flush_get_data), &flush_get_data, idx, NULL);
             if (OMPI_SUCCESS != ret) {
                 oshmem_shmem_abort(-1);

@@ -396,8 +396,10 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
 
     for (i = 0; i < nprocs; ++i) {
         for (j = 0; j < memheap_map->n_segments; j++) {
-            if (ctx->ucp_peers[i].mkeys[j].key.rkey != NULL) {
-                ucp_rkey_destroy(ctx->ucp_peers[i].mkeys[j].key.rkey);
+            ucp_peer_t *ucp_peer = &(ctx->ucp_peers[i]);
+            spml_ucx_cached_mkey_t *ucx_cached_mkey = mca_spml_ucx_ep_mkey_get(ucp_peer, j);
+            if (ucx_cached_mkey->key.rkey != NULL) {
+                ucp_rkey_destroy(ucx_cached_mkey->key.rkey);
             }
         }
 
