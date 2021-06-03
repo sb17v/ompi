@@ -515,8 +515,13 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     spml_ucx_mkey_t   *ucx_mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     ucs_status_t err;
+    int rc;
     
-    ucx_mkey = ep_get_new_key(ucx_ctx, pe, segno);
+    rc = ep_get_new_key(ucx_ctx, pe, segno, &ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("ep_get_new_key failed");
+        goto error_fatal;
+    }
 
     err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
             mkey->u.data,
@@ -543,6 +548,7 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     spml_ucx_mkey_t *ucx_mkey;
     ucp_mem_advise_params_t params;
     ucs_status_t status;
+    int rc;
     // ucp_peer_t *ucp_peer;
     // spml_ucx_cached_mkey_t *ucx_cached_mkey;
 
@@ -551,8 +557,10 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     }
 
     my_pe    = oshmem_my_proc_id();
-    ucx_mkey = ep_get_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX);
-
+    rc = ep_get_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("ep_get_key failed");
+    }
     params.field_mask = UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS |
                         UCP_MEM_ADVISE_PARAM_FIELD_LENGTH |
                         UCP_MEM_ADVISE_PARAM_FIELD_ADVICE;
@@ -582,6 +590,7 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     map_segment_t *mem_seg;
     unsigned flags;
     int my_pe = oshmem_my_proc_id();
+    int rc;
 
     *count = 0;
     mkeys = (sshmem_mkey_t *) calloc(1, sizeof(*mkeys));
@@ -592,7 +601,12 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     segno   = memheap_find_segnum(addr);
     mem_seg = memheap_find_seg(segno);
 
-    ucx_mkey = ep_get_new_key(&mca_spml_ucx_ctx_default, my_pe, segno);
+    rc = ep_get_new_key(&mca_spml_ucx_ctx_default, my_pe, segno, &ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("ep_get_new_key failed");
+        goto error_out;
+    }
+
     mkeys[0].spml_context = ucx_mkey;
 
     /* if possible use mem handle already created by ucx allocator */
@@ -778,7 +792,11 @@ static int mca_spml_ucx_ctx_create_common(long options, mca_spml_ucx_ctx_t **ucx
 
         for (j = 0; j < memheap_map->n_segments; j++) {
             mkey = &memheap_map->mem_segs[j].mkeys_cache[i][0];
-            ucx_mkey = ep_get_new_key(ucx_ctx, i, j);
+            rc = ep_get_new_key(ucx_ctx, i, j, &ucx_mkey);
+            if (OSHMEM_SUCCESS != rc) {
+                SPML_UCX_ERROR("ep_get_new_key failed");
+                goto error2;
+            }
 
             if (mkey->u.data) {
                 err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[i].ucp_conn,

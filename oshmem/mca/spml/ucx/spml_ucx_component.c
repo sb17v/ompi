@@ -392,15 +392,20 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
     int i, j, nprocs = oshmem_num_procs();
     opal_common_ucx_del_proc_t *del_procs;
     spml_ucx_mkey_t   *ucx_mkey;
+    int rc;
 
     del_procs = malloc(sizeof(*del_procs) * nprocs);
 
     for (i = 0; i < nprocs; ++i) {
         for (j = 0; j < memheap_map->n_segments; j++) {
-            ucx_mkey = ep_get_key(ctx, i, j);
-            if (ucx_mkey->rkey != NULL) {
-                ucp_rkey_destroy(ucx_mkey->rkey);
-                mca_spml_ucx_ep_mkey_release(&(ctx->ucp_peers[i]), j);
+            rc = ep_get_key(ctx, i, j, &ucx_mkey);
+            if (OSHMEM_SUCCESS != rc) {
+                SPML_UCX_ERROR("ep_get_key failed");
+            } else {
+                if (ucx_mkey->rkey != NULL) {
+                    ucp_rkey_destroy(ucx_mkey->rkey);
+                    mca_spml_ucx_ep_mkey_release(&(ctx->ucp_peers[i]), j);
+                }
             }
         }
 

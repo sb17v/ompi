@@ -216,25 +216,38 @@ mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t
     return OSHMEM_SUCCESS;
 }
 
-static inline spml_ucx_mkey_t *
-ep_get_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno)
+static inline int
+ep_get_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
     ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
-    return &(ucx_cached_mkey->key);
+    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        return rc;
+    }
+    *mkey = &(ucx_cached_mkey->key);
+    return OSHMEM_SUCCESS;
 }
 
-static inline spml_ucx_mkey_t *
-ep_get_new_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno)
+static inline int
+ep_get_new_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
     ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    mca_spml_ucx_ep_mkey_add(ucp_peer, segno);
-    mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
-    return &(ucx_cached_mkey->key);
+    rc = mca_spml_ucx_ep_mkey_add(ucp_peer, segno);
+    if (OSHMEM_SUCCESS != rc) {
+        return rc;
+    }
+    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        return rc;
+    }
+    *mkey = &(ucx_cached_mkey->key);
+    return OSHMEM_SUCCESS;
 }
 
 static inline void mca_spml_ucx_aux_lock(void)
