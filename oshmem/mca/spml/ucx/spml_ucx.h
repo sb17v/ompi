@@ -209,8 +209,10 @@ void mca_spml_ucx_ep_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe);
 static inline int
 mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t **out_rmkey)
 {
+    *out_rmkey = NULL;
     if (OPAL_UNLIKELY((index >= ucp_peer->mkeys_cnt) || (MCA_MEMHEAP_MAX_SEGMENTS <= index) || (0 > index))) {
-        SPML_UCX_ERROR("Failed to get mkey for segment: bad index = %d, MAX = %d, cached mkeys count: %d", index, MCA_MEMHEAP_MAX_SEGMENTS, ucp_peer->mkeys_cnt);
+        SPML_UCX_ERROR("Failed to get mkey for segment: bad index = %d, MAX = %d, cached mkeys count: %d",
+                                         index, MCA_MEMHEAP_MAX_SEGMENTS, ucp_peer->mkeys_cnt);
         return OSHMEM_ERR_BAD_PARAM;
     }
     *out_rmkey = ucp_peer->mkeys[index];
@@ -330,4 +332,3 @@ static inline void mca_spml_ucx_remote_op_posted(mca_spml_ucx_ctx_t *ctx, int ds
 END_C_DECLS
 
 #endif
-
