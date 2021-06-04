@@ -104,6 +104,13 @@ int mca_spml_ucx_enable(bool enable)
     return OSHMEM_SUCCESS;
 }
 
+/* initialize the mkey cache */
+void mca_spml_ucx_ep_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe)
+{
+    ucx_ctx->ucp_peers[pe].mkeys = NULL;
+    ucx_ctx->ucp_peers[pe].mkeys_cnt = 0;
+}
+
 /* add a new mkey and update update the mkeys_cnt */
 int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 {
@@ -156,7 +163,11 @@ void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int segno)
 /* Release the memkey map from a ucp_peer if it has any element in memkey */
 void mca_spml_ucx_ep_mkey_cache_release(ucp_peer_t *ucp_peer)
 {
+    int i;
     if (ucp_peer->mkeys_cnt) {
+        for(i = 0; i < ucp_peer->mkeys; i++) {
+            assert(NULL == ucp_peer->mkeys[i]);
+        } 
         free(ucp_peer->mkeys);
         ucp_peer->mkeys = NULL;
     } 
@@ -427,8 +438,7 @@ int mca_spml_ucx_add_procs(ompi_proc_t** procs, size_t nprocs)
         OSHMEM_PROC_DATA(procs[i])->transport_ids = spml_ucx_transport_ids;
 
         /* Initialize mkeys as NULL for all processes */
-        mca_spml_ucx_ctx_default.ucp_peers[i].mkeys = NULL;
-        mca_spml_ucx_ctx_default.ucp_peers[i].mkeys_cnt = 0;
+        mca_spml_ucx_ep_mkey_cache_init(&mca_spml_ucx_ctx_default, i);
     }
 
     for (i = 0; i < mca_spml_ucx.ucp_workers; i++) {
@@ -518,9 +528,9 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     ucs_status_t err;
     int rc;
     
-    rc = ep_get_new_key(ucx_ctx, pe, segno, &ucx_mkey);
+    rc = mca_spml_ucx_pe_add_key(ucx_ctx, pe, segno, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("ep_get_new_key failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_add_key failed");
         goto error_fatal;
     }
 
@@ -535,7 +545,11 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     if (ucx_ctx == &mca_spml_ucx_ctx_default) {
         mkey->spml_context = ucx_mkey;
     }
-    mca_spml_ucx_cache_mkey(ucx_ctx, mkey, segno, pe);
+    rc = mca_spml_ucx_cache_mkey(ucx_ctx, mkey, segno, pe);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+        goto error_fatal;
+    }
     return;
 
 error_fatal:
@@ -556,9 +570,9 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     }
 
     my_pe    = oshmem_my_proc_id();
-    rc = ep_get_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
+    rc = mca_spml_ucx_pe_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("ep_get_key failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
     }
     params.field_mask = UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS |
                         UCP_MEM_ADVISE_PARAM_FIELD_LENGTH |
@@ -600,9 +614,9 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     segno   = memheap_find_segnum(addr);
     mem_seg = memheap_find_seg(segno);
 
-    rc = ep_get_new_key(&mca_spml_ucx_ctx_default, my_pe, segno, &ucx_mkey);
+    rc = mca_spml_ucx_pe_add_key(&mca_spml_ucx_ctx_default, my_pe, segno, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("ep_get_new_key failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_add_key failed");
         goto error_out;
     }
 
@@ -655,7 +669,11 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     mkeys[0].len     = len;
     mkeys[0].va_base = addr;
     *count = 1;
-    mca_spml_ucx_cache_mkey(&mca_spml_ucx_ctx_default, &mkeys[0], segno, my_pe);
+    rc = mca_spml_ucx_cache_mkey(&mca_spml_ucx_ctx_default, &mkeys[0], segno, my_pe);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+        goto error_unmap;
+    }
     return mkeys;
 
 error_unmap:
@@ -791,9 +809,9 @@ static int mca_spml_ucx_ctx_create_common(long options, mca_spml_ucx_ctx_t **ucx
 
         for (j = 0; j < memheap_map->n_segments; j++) {
             mkey = &memheap_map->mem_segs[j].mkeys_cache[i][0];
-            rc = ep_get_new_key(ucx_ctx, i, j, &ucx_mkey);
+            rc = mca_spml_ucx_pe_add_key(ucx_ctx, i, j, &ucx_mkey);
             if (OSHMEM_SUCCESS != rc) {
-                SPML_UCX_ERROR("ep_get_new_key failed");
+                SPML_UCX_ERROR("mca_spml_ucx_pe_add_key failed");
                 goto error2;
             }
 
@@ -805,7 +823,11 @@ static int mca_spml_ucx_ctx_create_common(long options, mca_spml_ucx_ctx_t **ucx
                     SPML_UCX_ERROR("failed to unpack rkey");
                     goto error2;
                 }
-                mca_spml_ucx_cache_mkey(ucx_ctx, mkey, j, i);
+                rc = mca_spml_ucx_cache_mkey(ucx_ctx, mkey, j, i);
+                if (OSHMEM_SUCCESS != rc) {
+                    SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+                    goto error2;
+                }
             }
         }
     }

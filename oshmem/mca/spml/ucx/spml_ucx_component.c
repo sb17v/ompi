@@ -398,9 +398,9 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
 
     for (i = 0; i < nprocs; ++i) {
         for (j = 0; j < memheap_map->n_segments; j++) {
-            rc = ep_get_key(ctx, i, j, &ucx_mkey);
+            rc = mca_spml_ucx_pe_key(ctx, i, j, &ucx_mkey);
             if (OSHMEM_SUCCESS != rc) {
-                SPML_UCX_ERROR("ep_get_key failed");
+                SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
             } else {
                 if (ucx_mkey->rkey != NULL) {
                     ucp_rkey_destroy(ucx_mkey->rkey);

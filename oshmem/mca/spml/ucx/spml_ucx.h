@@ -204,6 +204,7 @@ int mca_spml_ucx_clear_put_op_mask(mca_spml_ucx_ctx_t *ctx);
 int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index);
 void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int segno);
 void mca_spml_ucx_ep_mkey_cache_release(ucp_peer_t *ucp_peer);
+void mca_spml_ucx_ep_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe);
 
 static inline int
 mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t **out_rmkey)
@@ -217,7 +218,7 @@ mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t
 }
 
 static inline int
-ep_get_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+mca_spml_ucx_pe_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
@@ -232,7 +233,7 @@ ep_get_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t 
 }
 
 static inline int
-ep_get_new_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
@@ -264,15 +265,21 @@ static inline void mca_spml_ucx_aux_unlock(void)
     }
 }
 
-static inline void mca_spml_ucx_cache_mkey(mca_spml_ucx_ctx_t *ucx_ctx,
+static inline int mca_spml_ucx_cache_mkey(mca_spml_ucx_ctx_t *ucx_ctx,
                                            sshmem_mkey_t *mkey, uint32_t segno, int dst_pe)
 {
     ucp_peer_t *peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
 
     peer = &(ucx_ctx->ucp_peers[dst_pe]);
-    mca_spml_ucx_ep_mkey_get(peer, segno, &ucx_cached_mkey);
+    rc = mca_spml_ucx_ep_mkey_get(peer, segno, &ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_get failed");
+        return rc;
+    }
     mkey_segment_init(&(*ucx_cached_mkey).super, mkey, segno);
+    return OSHMEM_SUCCESS;
 }
 
 static inline spml_ucx_mkey_t * 
