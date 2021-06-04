@@ -199,9 +199,6 @@ int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
         /* mark peer as disconnected */
         mca_spml_ucx_ctx_default.ucp_peers[i].ucp_conn = NULL;
         /* release the cached_ep_mkey buffer */
-        for(j=0; j < mca_spml_ucx_ctx_default.ucp_peers[i].mkeys_cnt; j++) {
-            mca_spml_ucx_ep_mkey_release(&(mca_spml_ucx_ctx_default.ucp_peers[i]), j);
-        }
         mca_spml_ucx_ep_mkey_cache_release(&(mca_spml_ucx_ctx_default.ucp_peers[i]));
     }
 
@@ -493,7 +490,7 @@ error:
 
 }
 
-void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey)
+void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe, uint32_t segno)
 {
     spml_ucx_mkey_t   *ucx_mkey;
 
@@ -501,7 +498,7 @@ void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey)
         return;
     }
     ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
-    ucp_rkey_destroy(ucx_mkey->rkey);
+    mca_spml_ucx_pe_rkey_release(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
 }
 
 void *mca_spml_ucx_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *mkey, int pe)
@@ -688,6 +685,7 @@ int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys)
 {
     spml_ucx_mkey_t   *ucx_mkey;
     map_segment_t *mem_seg;
+    int my_pe = oshmem_my_proc_id();
 
     MCA_SPML_CALL(quiet(oshmem_ctx_default));
     if (!mkeys)
@@ -706,8 +704,8 @@ int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys)
     if (MAP_SEGMENT_ALLOC_UCX != mem_seg->type) {
         ucp_mem_unmap(mca_spml_ucx.ucp_context, ucx_mkey->mem_h);
     }
-    ucp_rkey_destroy(ucx_mkey->rkey);
-    ucx_mkey->rkey = NULL;
+
+    mca_spml_ucx_pe_rkey_release(&mca_spml_ucx_ctx_default, my_pe, mem_seg->seg_id, ucx_mkey);
 
     if (0 < mkeys[0].len) {
         ucp_rkey_buffer_release(mkeys[0].u.data);

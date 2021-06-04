@@ -187,7 +187,7 @@ extern int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys);
 extern void mca_spml_ucx_memuse_hook(void *addr, size_t length);
 
 extern void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t segno, int pe, int tr_id);
-extern void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey);
+extern void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe, uint32_t segno);
 extern void *mca_spml_ucx_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *, int pe);
 
 extern int mca_spml_ucx_add_procs(ompi_proc_t** procs, size_t nprocs);
@@ -251,6 +251,17 @@ mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spm
     }
     *mkey = &(ucx_cached_mkey->key);
     return OSHMEM_SUCCESS;
+}
+
+static inline int
+mca_spml_ucx_pe_rkey_release(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey)
+{
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
+    ucp_rkey_destroy(ucx_mkey->rkey);
+    ucx_mkey->rkey = NULL;
+    mca_spml_ucx_ep_mkey_release(ucp_peer, segno);
 }
 
 static inline void mca_spml_ucx_aux_lock(void)
