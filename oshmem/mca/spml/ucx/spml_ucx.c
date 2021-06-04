@@ -107,7 +107,6 @@ int mca_spml_ucx_enable(bool enable)
 /* add a new mkey and update update the mkeys_cnt */
 int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 {
-    int old_size = ucp_peer->mkeys_cnt;
     if (MCA_MEMHEAP_MAX_SEGMENTS <= ucp_peer->mkeys_cnt) {
         SPML_UCX_ERROR("Failed to get new mkey for segment: max number (%d) of segment descriptor is exhausted",
                        MCA_MEMHEAP_MAX_SEGMENTS);
@@ -115,6 +114,8 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
     }
     /* Allocate an array to hold the pointers to the ucx_cached_mkey */
     if (index >= ucp_peer->mkeys_cnt){
+        int old_size = ucp_peer->mkeys_cnt;
+
         ucp_peer->mkeys_cnt = index + 1;
         ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(spml_ucx_cached_mkey_t *) * ucp_peer->mkeys_cnt);
         if (NULL == ucp_peer->mkeys) {
@@ -126,8 +127,9 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
         |MKEY1|00000|MKEY2|??????|NEW-MKEY|
         |<--- old_size -->|
         */
-        memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size) * sizeof(spml_ucx_cached_mkey_t *));
+        memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size) * sizeof(ucp_peer->mkeys[0]));
     } else {
+        /* Make sure we don't leak memory */
         assert(NULL == ucp_peer->mkeys[index]);
     }
     
@@ -142,8 +144,7 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 /* Release individual mkeys */
 void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int segno)
 {
-    if ((ucp_peer->mkeys_cnt >= segno) || (segno < 0))
-    {
+    if ((ucp_peer->mkeys_cnt <= segno) || (segno < 0)) {
         return;
     }
     if (NULL != ucp_peer->mkeys[segno]) {
@@ -549,8 +550,6 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     ucp_mem_advise_params_t params;
     ucs_status_t status;
     int rc;
-    // ucp_peer_t *ucp_peer;
-    // spml_ucx_cached_mkey_t *ucx_cached_mkey;
 
     if (!(mca_spml_ucx.heap_reg_nb && memheap_is_va_in_segment(addr, HEAP_SEG_INDEX))) {
         return;
