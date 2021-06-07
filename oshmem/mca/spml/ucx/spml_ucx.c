@@ -122,7 +122,11 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
     /* Allocate an array to hold the pointers to the ucx_cached_mkey */
     if (index >= ucp_peer->mkeys_cnt){
         int old_size = ucp_peer->mkeys_cnt;
-
+    if (MCA_MEMHEAP_MAX_SEGMENTS <= (index + 1)) {
+        SPML_UCX_ERROR("Failed to get new mkey for segment: max number (%d) of segment descriptor is exhausted",
+                       MCA_MEMHEAP_MAX_SEGMENTS);
+        return OSHMEM_ERROR;
+    }
         ucp_peer->mkeys_cnt = index + 1;
         ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(spml_ucx_cached_mkey_t *) * ucp_peer->mkeys_cnt);
         if (NULL == ucp_peer->mkeys) {
@@ -134,7 +138,7 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
         |MKEY1|00000|MKEY2|??????|NEW-MKEY|
         |<--- old_size -->|
         */
-        memset(ucp_peer->mkeys + old_size, 0, (index + 1 - old_size) * sizeof(ucp_peer->mkeys[0]));
+        memset(ucp_peer->mkeys + old_size, 0, (ucp_peer->mkeys_cnt - old_size) * sizeof(ucp_peer->mkeys[0]));
     } else {
         /* Make sure we don't leak memory */
         assert(NULL == ucp_peer->mkeys[index]);
@@ -152,12 +156,13 @@ int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index)
 void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int segno)
 {
     if ((ucp_peer->mkeys_cnt <= segno) || (segno < 0)) {
-        return;
+        return <NOENT>;
     }
     if (NULL != ucp_peer->mkeys[segno]) {
         free(ucp_peer->mkeys[segno]);
         ucp_peer->mkeys[segno] = NULL;
     }
+    return OSHMEM_SUCCESS;
 }
 
 /* Release the memkey map from a ucp_peer if it has any element in memkey */
@@ -178,7 +183,7 @@ int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
 {
     size_t ucp_workers = mca_spml_ucx.ucp_workers;
     opal_common_ucx_del_proc_t *del_procs;
-    size_t i, j, w, n;
+    size_t i, w, n;
     int ret;
 
     oshmem_shmem_barrier();
@@ -570,6 +575,7 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     rc = mca_spml_ucx_pe_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
         SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
+        return;
     }
     params.field_mask = UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS |
                         UCP_MEM_ADVISE_PARAM_FIELD_LENGTH |
