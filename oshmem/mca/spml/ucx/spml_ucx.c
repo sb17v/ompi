@@ -123,7 +123,7 @@ int mca_spml_ucx_ep_mkey_cache_add(ucp_peer_t *ucp_peer, int index)
             return OSHMEM_ERROR;
         }
         ucp_peer->mkeys_cnt = index + 1;
-        ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(spml_ucx_cached_mkey_t *) * ucp_peer->mkeys_cnt);
+        ucp_peer->mkeys = realloc(ucp_peer->mkeys, sizeof(ucp_peer->mkeys[0]) * ucp_peer->mkeys_cnt);
         if (NULL == ucp_peer->mkeys) {
             SPML_UCX_ERROR("Failed to obtain new mkey: OOM - failed to expand the descriptor buffer");
             return OSHMEM_ERR_OUT_OF_RESOURCE;
@@ -139,7 +139,7 @@ int mca_spml_ucx_ep_mkey_cache_add(ucp_peer_t *ucp_peer, int index)
         assert(NULL == ucp_peer->mkeys[index]);
     }
     
-    ucp_peer->mkeys[index] = (spml_ucx_cached_mkey_t *) malloc(sizeof(spml_ucx_cached_mkey_t));
+    ucp_peer->mkeys[index] = (spml_ucx_cached_mkey_t *) malloc(sizeof(*ucp_peer->mkeys[0]));
     if (NULL == ucp_peer->mkeys[index]) {
         SPML_UCX_ERROR("Failed to obtain new ucx_cached_mkey: OOM - failed to expand the descriptor buffer");
         return OSHMEM_ERR_OUT_OF_RESOURCE;
@@ -640,7 +640,7 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     }
     mkeys[SPML_UCX_TRANSP_IDX].len     = len;
     mkeys[SPML_UCX_TRANSP_IDX].va_base = addr;
-    *count = 1;
+    *count = SPML_UCX_TRANSP_CNT;
     rc = mca_spml_ucx_pe_add_key(&mca_spml_ucx_ctx_default, my_pe, segno, &mkeys[SPML_UCX_TRANSP_IDX], &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
         SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
