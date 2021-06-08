@@ -403,8 +403,10 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
                 SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
             } else {
                 if (ucx_mkey->rkey != NULL) {
-                    ucp_rkey_destroy(ucx_mkey->rkey);
-                    mca_spml_ucx_ep_mkey_release(&(ctx->ucp_peers[i]), j);
+                    rc = mca_spml_ucx_pe_rkey_del(ctx, i, j, ucx_mkey);
+                    if (OSHMEM_SUCCESS != rc) {
+                        SPML_UCX_ERROR("mca_spml_ucx_pe_rkey_del failed");
+                    }
                 }
             }
         }

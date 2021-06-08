@@ -44,6 +44,9 @@ BEGIN_C_DECLS
 #define SPML_UCX_ASSERT  MCA_COMMON_UCX_ASSERT
 #define SPML_UCX_ERROR   MCA_COMMON_UCX_ERROR
 #define SPML_UCX_VERBOSE MCA_COMMON_UCX_VERBOSE
+#define SPML_UCX_TRANSP_IDX 0
+#define SPML_UCX_TRANSP_CNT 1
+#define OSHMEM_UCX_SERVICE_SEG 0
 
 /**
  * UCX SPML module
@@ -201,8 +204,8 @@ void mca_spml_ucx_async_cb(int fd, short event, void *cbdata);
 
 int mca_spml_ucx_init_put_op_mask(mca_spml_ucx_ctx_t *ctx, size_t nprocs);
 int mca_spml_ucx_clear_put_op_mask(mca_spml_ucx_ctx_t *ctx);
-int mca_spml_ucx_ep_mkey_add(ucp_peer_t *ucp_peer, int index);
-void mca_spml_ucx_ep_mkey_release(ucp_peer_t *ucp_peer, int segno);
+int mca_spml_ucx_ep_mkey_cache_add(ucp_peer_t *ucp_peer, int index);
+int mca_spml_ucx_ep_mkey_cache_del(ucp_peer_t *ucp_peer, int segno);
 void mca_spml_ucx_ep_mkey_cache_release(ucp_peer_t *ucp_peer);
 void mca_spml_ucx_ep_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe);
 
@@ -235,13 +238,13 @@ mca_spml_ucx_pe_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_uc
 }
 
 static inline int
-mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+mca_spml_ucx_pe_new_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
     int rc;
     ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    rc = mca_spml_ucx_ep_mkey_add(ucp_peer, segno);
+    rc = mca_spml_ucx_ep_mkey_cache_add(ucp_peer, segno);
     if (OSHMEM_SUCCESS != rc) {
         return rc;
     }
@@ -254,14 +257,20 @@ mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spm
 }
 
 static inline int
-mca_spml_ucx_pe_rkey_release(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey)
+mca_spml_ucx_pe_rkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
     ucp_peer = &(ucx_ctx->ucp_peers[pe]);
     ucp_rkey_destroy(ucx_mkey->rkey);
     ucx_mkey->rkey = NULL;
-    mca_spml_ucx_ep_mkey_release(ucp_peer, segno);
+    rc = mca_spml_ucx_ep_mkey_cache_del(ucp_peer, segno);
+    if(OSHMEM_SUCCESS != rc){
+        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_cache_del failed");
+        return rc;
+    }
+    return OSHMEM_SUCCESS;
 }
 
 static inline void mca_spml_ucx_aux_lock(void)
@@ -295,6 +304,35 @@ static inline int mca_spml_ucx_cache_mkey(mca_spml_ucx_ctx_t *ucx_ctx,
     return OSHMEM_SUCCESS;
 }
 
+static inline int
+mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, sshmem_mkey_t *mkey, spml_ucx_mkey_t **ucx_mkey)
+{
+    int rc;
+    ucs_status_t err;
+
+    rc = mca_spml_ucx_pe_new_key(ucx_ctx, pe, segno, ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_pe_new_key failed");
+        return rc;
+    }
+
+    if (mkey->u.data) {
+        err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
+                                    mkey->u.data,
+                                    &((*ucx_mkey)->rkey));
+        if (UCS_OK != err) {
+            SPML_UCX_ERROR("failed to unpack rkey: %s", ucs_status_string(err));
+            return rc;
+        }
+        rc = mca_spml_ucx_cache_mkey(ucx_ctx, mkey, segno, pe);
+        if (OSHMEM_SUCCESS != rc) {
+            SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+            return rc;
+        }
+    }
+    return OSHMEM_SUCCESS;
+}
+
 static inline spml_ucx_mkey_t * 
 mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
 {
@@ -302,7 +340,7 @@ mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_uc
     spml_ucx_cached_mkey_t *mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
 
-    mkey = ucx_ctx->ucp_peers[pe].mkeys[0];
+    mkey = ucx_ctx->ucp_peers[pe].mkeys[OSHMEM_UCX_SERVICE_SEG];
     mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, sizeof(*mkey), va);
     assert(mkey != NULL);
     *rva = map_segment_va2rva(&mkey->super, va);
