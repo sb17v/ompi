@@ -339,9 +339,12 @@ mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_uc
     ucp_peer_t *peer;
     spml_ucx_cached_mkey_t *mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
+    int rc;
 
-    mkey = ucx_ctx->ucp_peers[pe].mkeys[OSHMEM_UCX_SERVICE_SEG];
-    mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, sizeof(*mkey), va);
+    peer = &(ucx_ctx->ucp_peers[pe]);
+    rc = mca_spml_ucx_ep_mkey_get(peer, OSHMEM_UCX_SERVICE_SEG, &mkey);
+    assert(OSHMEM_SUCCESS != rc);
+    mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, peer->mkeys_cnt, sizeof(*mkey), va);
     assert(mkey != NULL);
     *rva = map_segment_va2rva(&mkey->super, va);
     return &mkey->key;
