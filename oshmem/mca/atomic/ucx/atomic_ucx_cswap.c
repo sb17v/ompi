@@ -48,7 +48,7 @@ int mca_atomic_ucx_cswap(shmem_ctx_t ctx,
     assert(NULL != prev);
 
     *prev      = value;
-    ucx_mkey   = mca_spml_ucx_get_mkey(ctx, pe, target, (void *)&rva, mca_spml_self);
+    ucx_mkey   = mca_spml_ucx_pe_mkey_by_va(ctx, pe, target, (void *)&rva, mca_spml_self);
 #if HAVE_DECL_UCP_ATOMIC_OP_NBX
     status_ptr = ucp_atomic_op_nbx(ucx_ctx->ucp_peers[pe].ucp_conn,
                                    UCP_ATOMIC_OP_CSWAP, &cond, 1, rva,

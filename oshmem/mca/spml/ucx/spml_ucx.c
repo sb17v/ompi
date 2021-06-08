@@ -147,6 +147,24 @@ int mca_spml_ucx_ep_mkey_cache_add(ucp_peer_t *ucp_peer, int index)
     return OSHMEM_SUCCESS;
 }
 
+int mca_spml_ucx_pe_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+{
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
+    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
+    rc = mca_spml_ucx_ep_mkey_cache_add(ucp_peer, segno);
+    if (OSHMEM_SUCCESS != rc) {
+        return rc;
+    }
+    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        return rc;
+    }
+    *mkey = &(ucx_cached_mkey->key);
+    return OSHMEM_SUCCESS;
+}
+
 /* Release individual mkeys */
 int mca_spml_ucx_ep_mkey_cache_del(ucp_peer_t *ucp_peer, int segno)
 {
@@ -172,6 +190,22 @@ void mca_spml_ucx_ep_mkey_cache_release(ucp_peer_t *ucp_peer)
         ucp_peer->mkeys = NULL;
     } 
     
+}
+
+int mca_spml_ucx_pe_mkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey)
+{
+    ucp_peer_t *ucp_peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
+    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
+    ucp_rkey_destroy(ucx_mkey->rkey);
+    ucx_mkey->rkey = NULL;
+    rc = mca_spml_ucx_ep_mkey_cache_del(ucp_peer, segno);
+    if(OSHMEM_SUCCESS != rc){
+        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_cache_del failed");
+        return rc;
+    }
+    return OSHMEM_SUCCESS;
 }
 
 int mca_spml_ucx_del_procs(ompi_proc_t** procs, size_t nprocs)
@@ -499,9 +533,9 @@ void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe, uint32_t segno)
         return;
     }
     ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
-    rc = mca_spml_ucx_pe_rkey_del(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
+    rc = mca_spml_ucx_pe_mkey_del(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_pe_rkey_del failed\n");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_del failed\n");
         return;
     }
 }
@@ -529,9 +563,9 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     int rc;
 
-    rc = mca_spml_ucx_pe_add_key(ucx_ctx, pe, segno, mkey, &ucx_mkey);
+    rc = mca_spml_ucx_pe_mkey_add(ucx_ctx, pe, segno, mkey, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_cache failed");
         goto error_fatal;
     }
     if (ucx_ctx == &mca_spml_ucx_ctx_default) {
@@ -542,6 +576,51 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
 error_fatal:
     oshmem_shmem_abort(-1);
     return;
+}
+
+int mca_spml_ucx_pe_mkey_cache(mca_spml_ucx_ctx_t *ucx_ctx,
+                                           sshmem_mkey_t *mkey, uint32_t segno, int dst_pe)
+{
+    ucp_peer_t *peer;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
+
+    peer = &(ucx_ctx->ucp_peers[dst_pe]);
+    rc = mca_spml_ucx_ep_mkey_get(peer, segno, &ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_get failed");
+        return rc;
+    }
+    mkey_segment_init(&(*ucx_cached_mkey).super, mkey, segno);
+    return OSHMEM_SUCCESS;
+}
+
+int mca_spml_ucx_pe_mkey_add(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, sshmem_mkey_t *mkey, spml_ucx_mkey_t **ucx_mkey)
+{
+    int rc;
+    ucs_status_t err;
+
+    rc = mca_spml_ucx_pe_mkey_new(ucx_ctx, pe, segno, ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_new failed");
+        return rc;
+    }
+
+    if (mkey->u.data) {
+        err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
+                                    mkey->u.data,
+                                    &((*ucx_mkey)->rkey));
+        if (UCS_OK != err) {
+            SPML_UCX_ERROR("failed to unpack rkey: %s", ucs_status_string(err));
+            return rc;
+        }
+        rc = mca_spml_ucx_pe_mkey_cache(ucx_ctx, mkey, segno, pe);
+        if (OSHMEM_SUCCESS != rc) {
+            SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_cache failed");
+            return rc;
+        }
+    }
+    return OSHMEM_SUCCESS;
 }
 
 void mca_spml_ucx_memuse_hook(void *addr, size_t length)
@@ -557,9 +636,9 @@ void mca_spml_ucx_memuse_hook(void *addr, size_t length)
     }
 
     my_pe    = oshmem_my_proc_id();
-    rc = mca_spml_ucx_pe_key(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
+    rc = mca_spml_ucx_pe_mkey_by_seg(&mca_spml_ucx_ctx_default, my_pe, HEAP_SEG_INDEX, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_by_seg failed");
         return;
     }
     params.field_mask = UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS |
@@ -641,9 +720,9 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     mkeys[SPML_UCX_TRANSP_IDX].len     = len;
     mkeys[SPML_UCX_TRANSP_IDX].va_base = addr;
     *count = SPML_UCX_TRANSP_CNT;
-    rc = mca_spml_ucx_pe_add_key(&mca_spml_ucx_ctx_default, my_pe, segno, &mkeys[SPML_UCX_TRANSP_IDX], &ucx_mkey);
+    rc = mca_spml_ucx_pe_mkey_add(&mca_spml_ucx_ctx_default, my_pe, segno, &mkeys[SPML_UCX_TRANSP_IDX], &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_cache failed");
         goto error_unmap;
     }
     ucx_mkey->mem_h = mem_h;
@@ -683,9 +762,9 @@ int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys)
         ucp_mem_unmap(mca_spml_ucx.ucp_context, ucx_mkey->mem_h);
     }
 
-    rc = mca_spml_ucx_pe_rkey_del(&mca_spml_ucx_ctx_default, my_pe, mem_seg->seg_id, ucx_mkey);
+    rc = mca_spml_ucx_pe_mkey_del(&mca_spml_ucx_ctx_default, my_pe, mem_seg->seg_id, ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_pe_rkey_del failed\n");
+        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_del failed\n");
         return rc;
     }
     if (0 < mkeys[SPML_UCX_TRANSP_IDX].len) {
@@ -788,9 +867,9 @@ static int mca_spml_ucx_ctx_create_common(long options, mca_spml_ucx_ctx_t **ucx
 
         for (j = 0; j < memheap_map->n_segments; j++) {
             mkey = &memheap_map->mem_segs[j].mkeys_cache[i][0];
-            rc = mca_spml_ucx_pe_add_key(ucx_ctx, i, j, mkey, &ucx_mkey);
+            rc = mca_spml_ucx_pe_mkey_add(ucx_ctx, i, j, mkey, &ucx_mkey);
             if (OSHMEM_SUCCESS != rc) {
-                SPML_UCX_ERROR("mca_spml_ucx_pe_add_key failed");
+                SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_add failed");
                 goto error2;
             }
         }
@@ -885,7 +964,7 @@ void mca_spml_ucx_ctx_destroy(shmem_ctx_t ctx)
 int mca_spml_ucx_get(shmem_ctx_t ctx, void *src_addr, size_t size, void *dst_addr, int src)
 {
     void *rva;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, src, src_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, src, src_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
 #if (HAVE_DECL_UCP_GET_NBX || HAVE_DECL_UCP_GET_NB)
     ucs_status_ptr_t request;
@@ -912,7 +991,7 @@ int mca_spml_ucx_get_nb(shmem_ctx_t ctx, void *src_addr, size_t size, void *dst_
 {
     void *rva;
     ucs_status_t status;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, src, src_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, src, src_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
 #if HAVE_DECL_UCP_GET_NBX
     ucs_status_ptr_t status_ptr;
@@ -939,7 +1018,7 @@ int mca_spml_ucx_get_nb_wprogress(shmem_ctx_t ctx, void *src_addr, size_t size, 
     unsigned int i;
     void *rva;
     ucs_status_t status;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, src, src_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, src, src_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
 #if HAVE_DECL_UCP_GET_NBX
     ucs_status_ptr_t status_ptr;
@@ -975,7 +1054,7 @@ int mca_spml_ucx_get_nb_wprogress(shmem_ctx_t ctx, void *src_addr, size_t size, 
 int mca_spml_ucx_put(shmem_ctx_t ctx, void* dst_addr, size_t size, void* src_addr, int dst)
 {
     void *rva;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     int res;
 #if (HAVE_DECL_UCP_PUT_NBX || HAVE_DECL_UCP_PUT_NB)
@@ -1008,7 +1087,7 @@ int mca_spml_ucx_put(shmem_ctx_t ctx, void* dst_addr, size_t size, void* src_add
 int mca_spml_ucx_put_nb(shmem_ctx_t ctx, void* dst_addr, size_t size, void* src_addr, int dst, void **handle)
 {
     void *rva;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     ucs_status_t status;
 #if HAVE_DECL_UCP_PUT_NBX
@@ -1041,7 +1120,7 @@ int mca_spml_ucx_put_nb_wprogress(shmem_ctx_t ctx, void* dst_addr, size_t size, 
     unsigned int i;
     void *rva;
     ucs_status_t status;
-    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_get_mkey(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
+    spml_ucx_mkey_t *ucx_mkey = mca_spml_ucx_pe_mkey_by_va(ctx, dst, dst_addr, &rva, &mca_spml_ucx);
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
 #if HAVE_DECL_UCP_PUT_NBX
     ucs_status_ptr_t status_ptr;
@@ -1110,7 +1189,7 @@ int mca_spml_ucx_quiet(shmem_ctx_t ctx)
         for (i = 0; i < ucx_ctx->put_proc_count; i++) {
             idx = ucx_ctx->put_proc_indexes[i];
             ret = mca_spml_ucx_get_nb(ctx,
-                                      ucx_ctx->ucp_peers[idx].mkeys[OSHMEM_UCX_SERVICE_SEG]->super.super.va_base,
+                                      ucx_ctx->ucp_peers[idx].mkeys[SPML_UCX_SERVICE_SEG]->super.super.va_base,
                                       sizeof(flush_get_data), &flush_get_data, idx, NULL);
             if (OMPI_SUCCESS != ret) {
                 oshmem_shmem_abort(-1);

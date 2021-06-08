@@ -208,6 +208,10 @@ int mca_spml_ucx_ep_mkey_cache_add(ucp_peer_t *ucp_peer, int index);
 int mca_spml_ucx_ep_mkey_cache_del(ucp_peer_t *ucp_peer, int segno);
 void mca_spml_ucx_ep_mkey_cache_release(ucp_peer_t *ucp_peer);
 void mca_spml_ucx_ep_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe);
+int mca_spml_ucx_pe_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey);
+int mca_spml_ucx_pe_mkey_cache(mca_spml_ucx_ctx_t *ucx_ctx, sshmem_mkey_t *mkey, uint32_t segno, int dst_pe);
+int mca_spml_ucx_pe_mkey_add(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, sshmem_mkey_t *mkey, spml_ucx_mkey_t **ucx_mkey);
+int mca_spml_ucx_pe_mkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey);
 
 static inline int
 mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t **out_rmkey)
@@ -219,57 +223,6 @@ mca_spml_ucx_ep_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t
         return OSHMEM_ERR_BAD_PARAM;
     }
     *out_rmkey = ucp_peer->mkeys[index];
-    return OSHMEM_SUCCESS;
-}
-
-static inline int
-mca_spml_ucx_pe_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
-{
-    ucp_peer_t *ucp_peer;
-    spml_ucx_cached_mkey_t *ucx_cached_mkey;
-    int rc;
-    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
-    if (OSHMEM_SUCCESS != rc) {
-        return rc;
-    }
-    *mkey = &(ucx_cached_mkey->key);
-    return OSHMEM_SUCCESS;
-}
-
-static inline int
-mca_spml_ucx_pe_new_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
-{
-    ucp_peer_t *ucp_peer;
-    spml_ucx_cached_mkey_t *ucx_cached_mkey;
-    int rc;
-    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    rc = mca_spml_ucx_ep_mkey_cache_add(ucp_peer, segno);
-    if (OSHMEM_SUCCESS != rc) {
-        return rc;
-    }
-    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
-    if (OSHMEM_SUCCESS != rc) {
-        return rc;
-    }
-    *mkey = &(ucx_cached_mkey->key);
-    return OSHMEM_SUCCESS;
-}
-
-static inline int
-mca_spml_ucx_pe_rkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey)
-{
-    ucp_peer_t *ucp_peer;
-    spml_ucx_cached_mkey_t *ucx_cached_mkey;
-    int rc;
-    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
-    ucp_rkey_destroy(ucx_mkey->rkey);
-    ucx_mkey->rkey = NULL;
-    rc = mca_spml_ucx_ep_mkey_cache_del(ucp_peer, segno);
-    if(OSHMEM_SUCCESS != rc){
-        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_cache_del failed");
-        return rc;
-    }
     return OSHMEM_SUCCESS;
 }
 
@@ -287,54 +240,23 @@ static inline void mca_spml_ucx_aux_unlock(void)
     }
 }
 
-static inline int mca_spml_ucx_cache_mkey(mca_spml_ucx_ctx_t *ucx_ctx,
-                                           sshmem_mkey_t *mkey, uint32_t segno, int dst_pe)
+static inline int
+mca_spml_ucx_pe_mkey_by_seg(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
 {
-    ucp_peer_t *peer;
+    ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
     int rc;
-
-    peer = &(ucx_ctx->ucp_peers[dst_pe]);
-    rc = mca_spml_ucx_ep_mkey_get(peer, segno, &ucx_cached_mkey);
+    ucp_peer = &(ucx_ctx->ucp_peers[pe]);
+    rc = mca_spml_ucx_ep_mkey_get(ucp_peer, segno, &ucx_cached_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_ep_mkey_get failed");
         return rc;
     }
-    mkey_segment_init(&(*ucx_cached_mkey).super, mkey, segno);
-    return OSHMEM_SUCCESS;
-}
-
-static inline int
-mca_spml_ucx_pe_add_key(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, sshmem_mkey_t *mkey, spml_ucx_mkey_t **ucx_mkey)
-{
-    int rc;
-    ucs_status_t err;
-
-    rc = mca_spml_ucx_pe_new_key(ucx_ctx, pe, segno, ucx_mkey);
-    if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_pe_new_key failed");
-        return rc;
-    }
-
-    if (mkey->u.data) {
-        err = ucp_ep_rkey_unpack(ucx_ctx->ucp_peers[pe].ucp_conn,
-                                    mkey->u.data,
-                                    &((*ucx_mkey)->rkey));
-        if (UCS_OK != err) {
-            SPML_UCX_ERROR("failed to unpack rkey: %s", ucs_status_string(err));
-            return rc;
-        }
-        rc = mca_spml_ucx_cache_mkey(ucx_ctx, mkey, segno, pe);
-        if (OSHMEM_SUCCESS != rc) {
-            SPML_UCX_ERROR("mca_spml_ucx_cache_mkey failed");
-            return rc;
-        }
-    }
+    *mkey = &(ucx_cached_mkey->key);
     return OSHMEM_SUCCESS;
 }
 
 static inline spml_ucx_mkey_t * 
-mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
+mca_spml_ucx_pe_mkey_by_va(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
 {
     ucp_peer_t *peer;
     spml_ucx_cached_mkey_t *mkey;
@@ -342,7 +264,7 @@ mca_spml_ucx_get_mkey(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_uc
     int rc;
 
     peer = &(ucx_ctx->ucp_peers[pe]);
-    rc = mca_spml_ucx_ep_mkey_get(peer, OSHMEM_UCX_SERVICE_SEG, &mkey);
+    rc = mca_spml_ucx_ep_mkey_get(peer, SPML_UCX_SERVICE_SEG, &mkey);
     assert(OSHMEM_SUCCESS != rc);
     mkey = (spml_ucx_cached_mkey_t *)map_segment_find_va(&mkey->super.super, peer->mkeys_cnt, sizeof(*mkey), va);
     assert(mkey != NULL);

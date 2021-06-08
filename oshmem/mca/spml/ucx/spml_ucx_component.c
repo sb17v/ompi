@@ -398,14 +398,14 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
 
     for (i = 0; i < nprocs; ++i) {
         for (j = 0; j < memheap_map->n_segments; j++) {
-            rc = mca_spml_ucx_pe_key(ctx, i, j, &ucx_mkey);
+            rc = mca_spml_ucx_pe_mkey_by_seg(ctx, i, j, &ucx_mkey);
             if (OSHMEM_SUCCESS != rc) {
-                SPML_UCX_ERROR("mca_spml_ucx_pe_key failed");
+                SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_by_seg failed");
             } else {
                 if (ucx_mkey->rkey != NULL) {
-                    rc = mca_spml_ucx_pe_rkey_del(ctx, i, j, ucx_mkey);
+                    rc = mca_spml_ucx_pe_mkey_del(ctx, i, j, ucx_mkey);
                     if (OSHMEM_SUCCESS != rc) {
-                        SPML_UCX_ERROR("mca_spml_ucx_pe_rkey_del failed");
+                        SPML_UCX_ERROR("mca_spml_ucx_pe_mkey_del failed");
                     }
                 }
             }
