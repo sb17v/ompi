@@ -201,12 +201,12 @@ static inline void *map_segment_va2rva(mkey_segment_t *seg, void *va)
 }
 
 static inline map_base_segment_t *map_segment_find_va(map_base_segment_t *segs,
-                                                      size_t elem_size, void *va)
+                                                      size_t nelems, size_t elem_size, void *va)
 {
     map_base_segment_t *rseg;
     int i;
 
-    for (i = 0; i < MCA_MEMHEAP_MAX_SEGMENTS; i++) {
+    for (i = 0; i < nelems; i++) {
         rseg = (map_base_segment_t *)((char *)segs + elem_size * i);
         if (OPAL_LIKELY(map_segment_is_va_in(rseg, va))) {
             return rseg;
