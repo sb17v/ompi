@@ -150,7 +150,6 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
     int cur_pe, count_pe;
     int i;
     oshmem_group_t* group = NULL;
-    ompi_proc_t** proc_array = NULL;
     ompi_proc_t* proc = NULL;
 
     assert(oshmem_proc_local());
@@ -171,11 +170,9 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
     OPAL_THREAD_LOCK(&oshmem_proc_lock);
 
     /* allocate an array */
-    proc_array = (ompi_proc_t**) malloc(pe_size * sizeof(ompi_proc_t*));
-    if (NULL == proc_array) {
-        OBJ_RELEASE(group);
-        OPAL_THREAD_UNLOCK(&oshmem_proc_lock);
-        return NULL ;
+    group->proc_vpids = (opal_vpid_t *) malloc(pe_size * sizeof(group->proc_vpids[0]));
+    if (NULL == group->proc_vpids) {
+        return NULL;
     }
 
     group->my_pe = oshmem_proc_pe(oshmem_proc_local());
@@ -195,8 +192,9 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
         } else if ((cur_pe >= pe_start)
                 && ((pe_stride == 0)
                     || (((cur_pe - pe_start) % pe_stride) == 0))) {
-            proc_array[count_pe++] = proc;
-            if (oshmem_proc_pe(proc) == group->my_pe)
+            group->proc_vpids[count_pe] = i;
+            count_pe ++;
+            if (oshmem_proc_pe_vpid(group, i) == group->my_pe)
                 group->is_member = 1;
         }
         cur_pe++;
@@ -212,8 +210,8 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
 
         for (i = 0; i < group->proc_count; i++) {
             peer = OBJ_NEW(opal_namelist_t);
-            peer->name.jobid = OSHMEM_PROC_JOBID(group->proc_array[i]);
-            peer->name.vpid = OSHMEM_PROC_VPID(group->proc_array[i]);
+            peer->name.jobid = group->proc_vpids[i];
+            peer->name.vpid = OMPI_PROC_MY_NAME->jobid;
             opal_list_append(&(group->peer_list), &peer->super);
         }
     }
@@ -252,8 +250,9 @@ oshmem_proc_group_destroy_internal(oshmem_group_t* group, int scoll_unselect)
     }
 
     /* Destroy proc array */
-    if (group->proc_array) {
-        free(group->proc_array);
+    OBJ_DESTRUCT(&_oshmem_local_vpids);
+    if (group->proc_vpids) {
+        free(group->proc_vpids);
     }
 
     /* Destroy peer list */
