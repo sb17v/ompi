@@ -19,6 +19,7 @@
 #include "oshmem/constants.h"
 
 #include "opal/class/opal_list.h"
+#include "opal/class/opal_bitmap.h"
 #include "opal/util/proc.h"
 #include "opal/mca/hwloc/hwloc-internal.h"
 
@@ -266,22 +267,6 @@ static inline int oshmem_num_procs(void)
 static inline int oshmem_my_proc_id(void)
 {
     return oshmem_group_self->my_pe;
-}
-
-static inline int oshmem_get_transport_id(int pe)
-{
-    ompi_proc_t *proc;
-
-    proc = oshmem_proc_group_find(oshmem_group_all, pe);
-
-    return (int) OSHMEM_PROC_DATA(proc)->transport_ids[0];
-}
-
-static inline int oshmem_get_transport_count(int pe)
-{
-    ompi_proc_t *proc;
-    proc = oshmem_proc_group_find(oshmem_group_all, pe);
-    return OSHMEM_PROC_DATA(proc)->num_transports;
 }
 
 END_C_DECLS
