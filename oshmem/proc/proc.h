@@ -55,14 +55,14 @@ typedef struct oshmem_proc_data_t oshmem_proc_data_t;
  *
  * Set of processes used in collective operations.
  */
+static opal_bitmap_t _oshmem_local_vpids;       /* Track the vpids in local node */
 struct oshmem_group_t {
     opal_object_t               base;
     int                         id;             /**< index in global array */
     int                         my_pe;
     int                         proc_count;     /**< number of processes in group */
     int                         is_member;   /* true if my_pe is part of the group, participate in collectives */
-    struct ompi_proc_t          **proc_array; /**< list of pointers to ompi_proc_t structures
-                                                   for each process in the group */
+    opal_vpid_t                 *proc_vpids; /* vpids of each process in group */
     opal_list_t                 peer_list;
 
     /* Collectives module interface and data */
@@ -149,14 +149,17 @@ static inline ompi_proc_t *oshmem_proc_find(int pe)
     return oshmem_proc_for_find(name);
 }
 
+static inline int oshmem_proc_pe_vpid(oshmem_group_t *group, int pe)
+{
+    return ((pe < group->proc_count) ? (group->proc_vpids[pe]): -1);
+}
+
 static inline int oshmem_proc_pe(ompi_proc_t *proc)
 {
     return (proc ? (int) ((ompi_process_name_t*)&proc->super.proc_name)->vpid : -1);
 }
 
-#define OSHMEM_PROC_JOBID(PROC)    (((ompi_process_name_t*)&((PROC)->super.proc_name))->jobid)
-#define OSHMEM_PROC_VPID(PROC)     (((ompi_process_name_t*)&((PROC)->super.proc_name))->vpid)
-
+#define OSHMEM_PROC_ON_LOCAL_NODE(pe) (opal_bitmap_is_set_bit(&_oshmem_local_vpids, pe))
 /**
  * Initialize the OSHMEM process predefined groups
  *
@@ -232,40 +235,6 @@ fatal:
  */
 OSHMEM_DECLSPEC void oshmem_proc_group_destroy(oshmem_group_t* group);
 
-static inline ompi_proc_t *oshmem_proc_group_all(int pe)
-{
-    return oshmem_group_all->proc_array[pe];
-}
-
-static inline ompi_proc_t *oshmem_proc_group_find(oshmem_group_t* group,
-                                                    int pe)
-{
-    int i = 0;
-    ompi_proc_t* proc = NULL;
-
-    if (OPAL_LIKELY(group)) {
-        if (OPAL_LIKELY(group == oshmem_group_all)) {
-            /* To improve performance use direct index. It is feature of oshmem_group_all */
-            proc = group->proc_array[pe];
-        } else {
-            for (i = 0; i < group->proc_count; i++) {
-                if (pe == oshmem_proc_pe(group->proc_array[i])) {
-                    proc = group->proc_array[i];
-                    break;
-                }
-            }
-        }
-    } else {
-        ompi_process_name_t name;
-
-        name.jobid = OMPI_PROC_MY_NAME->jobid;
-        name.vpid = pe;
-        proc = oshmem_proc_for_find(name);
-    }
-
-    return proc;
-}
-
 static inline int oshmem_proc_group_find_id(oshmem_group_t* group, int pe)
 {
     int i = 0;
@@ -273,7 +242,7 @@ static inline int oshmem_proc_group_find_id(oshmem_group_t* group, int pe)
 
     if (group) {
         for (i = 0; i < group->proc_count; i++) {
-            if (pe == oshmem_proc_pe(group->proc_array[i])) {
+            if (pe == oshmem_proc_pe_vpid(group, i)) {
                 id = i;
                 break;
             }
