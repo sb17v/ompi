@@ -253,6 +253,7 @@ int mca_spml_ucx_ctx_mkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segn
     return OSHMEM_SUCCESS;
 }
 
+
 int mca_spml_ucx_del_procs(oshmem_group_t* group, size_t nprocs)
 {
     size_t ucp_workers = mca_spml_ucx.ucp_workers;
