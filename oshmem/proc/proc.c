@@ -34,33 +34,13 @@ static opal_mutex_t oshmem_proc_lock;
 
 int oshmem_proc_init(void)
 {
-    opal_process_name_t wildcard_rank;
-    int ret = OMPI_SUCCESS;
-    char *val = NULL;
-
+    int ret;
     OBJ_CONSTRUCT(&oshmem_proc_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&_oshmem_local_vpids, opal_bitmap_t);
 
-    ret = opal_bitmap_init(&_oshmem_local_vpids, ompi_comm_size(oshmem_comm_world));
-    if (OMPI_SUCCESS != ret) {
+    ret = oshmem_proc_init_set_local_vpids();
+    if(OSHMEM_SUCCESS != ret) {
         return ret;
-    }
-    /* Add all local peers first */
-    wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
-    wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
-    /* retrieve the local peers */
-    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
-                          &wildcard_rank, &val, PMIX_STRING);
-
-    if (OPAL_SUCCESS == ret && NULL != val) {
-        char **peers = opal_argv_split(val, ',');
-        int i;
-        free(val);
-        for (i=0; NULL != peers[i]; i++) {
-            ompi_vpid_t local_rank = strtoul(peers[i], NULL, 10);
-            opal_bitmap_set_bit(&_oshmem_local_vpids, local_rank);
-        }
-        opal_argv_free(peers);
     }
 
     /* check oshmem_proc_data_t can fit within ompi_proc_t padding */
@@ -212,7 +192,7 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
                     || (((cur_pe - pe_start) % pe_stride) == 0))) {
             group->proc_vpids[count_pe] = i;
             count_pe ++;
-            if (oshmem_proc_pe_vpid(group, i) == group->my_pe)
+            if (i == group->my_pe)
                 group->is_member = 1;
         }
         cur_pe++;

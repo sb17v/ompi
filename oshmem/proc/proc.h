@@ -21,6 +21,7 @@
 #include "opal/class/opal_list.h"
 #include "opal/class/opal_bitmap.h"
 #include "opal/util/proc.h"
+#include "opal/util/argv.h"
 #include "opal/mca/hwloc/hwloc-internal.h"
 
 #include "ompi/proc/proc.h"
@@ -152,7 +153,11 @@ static inline ompi_proc_t *oshmem_proc_find(int pe)
 
 static inline int oshmem_proc_pe_vpid(oshmem_group_t *group, int pe)
 {
-    return ((pe < group->proc_count) ? (group->proc_vpids[pe]): -1);
+    if (OPAL_LIKELY(pe < group->proc_count)) {
+        return (group->proc_vpids[pe]);
+    } else {
+        return -1;
+    }
 }
 
 static inline int oshmem_proc_pe(ompi_proc_t *proc)
@@ -161,6 +166,35 @@ static inline int oshmem_proc_pe(ompi_proc_t *proc)
 }
 
 #define OSHMEM_PROC_ON_LOCAL_NODE(pe) (opal_bitmap_is_set_bit(&_oshmem_local_vpids, pe))
+static inline int oshmem_proc_init_set_local_vpids()
+{
+    opal_process_name_t wildcard_rank;
+    int ret = OMPI_SUCCESS;
+    char *val = NULL;
+    
+    ret = opal_bitmap_init(&_oshmem_local_vpids, ompi_comm_size(oshmem_comm_world));
+    if (OSHMEM_SUCCESS != ret) {
+        return ret;
+    }
+    /* Add all local peers first */
+    wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
+    wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
+    /* retrieve the local peers */
+    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
+                          &wildcard_rank, &val, PMIX_STRING);
+
+    if (OPAL_SUCCESS == ret && NULL != val) {
+        char **peers = opal_argv_split(val, ',');
+        int i;
+        free(val);
+        for (i=0; NULL != peers[i]; i++) {
+            ompi_vpid_t local_rank = strtoul(peers[i], NULL, 10);
+            opal_bitmap_set_bit(&_oshmem_local_vpids, local_rank);
+        }
+        opal_argv_free(peers);
+    }
+    return OSHMEM_SUCCESS;
+}
 /**
  * Initialize the OSHMEM process predefined groups
  *
