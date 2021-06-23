@@ -165,7 +165,7 @@ static void unpack_remote_mkeys(shmem_ctx_t ctx, pmix_data_buffer_t *msg, int re
         if (0 == memheap_oob.mkeys[tr_id].va_base) {
             cnt = 1;
             PMIx_Data_unpack(NULL, msg, &memheap_oob.mkeys[tr_id].u.key, &cnt, PMIX_UINT64);
-            if (OSHMEM_PROC_ON_LOCAL_NODE(remote_pe)) {
+            if (oshmem_proc_on_local_node(remote_pe)) {
                 memheap_attach_segment(&memheap_oob.mkeys[tr_id], tr_id);
             }
         } else {

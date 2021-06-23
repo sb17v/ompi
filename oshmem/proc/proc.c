@@ -61,6 +61,12 @@ int oshmem_proc_init_set_local_vpids()
     }
     return OSHMEM_SUCCESS;
 }
+
+bool oshmem_proc_on_local_node(int pe)
+{
+    return opal_bitmap_is_set_bit(&_oshmem_local_vpids, pe);
+}
+
 int oshmem_proc_init(void)
 {
     int ret;

@@ -164,8 +164,8 @@ static inline int oshmem_proc_pe(ompi_proc_t *proc)
     return (proc ? (int) ((ompi_process_name_t*)&proc->super.proc_name)->vpid : -1);
 }
 
-#define OSHMEM_PROC_ON_LOCAL_NODE(pe) (opal_bitmap_is_set_bit(&_oshmem_local_vpids, pe))
 int oshmem_proc_init_set_local_vpids();
+bool oshmem_proc_on_local_node(int pe);
 /**
  * Initialize the OSHMEM process predefined groups
  *
