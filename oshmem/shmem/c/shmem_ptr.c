@@ -45,7 +45,7 @@ void *shmem_ptr(const void *dst_addr, int pe)
     }
 
     /* The memory must be on the local node */
-    if (!OSHMEM_PROC_ON_LOCAL_NODE(pe)) {
+    if (!oshmem_proc_on_local_node(pe)) {
         return NULL;
     }
 

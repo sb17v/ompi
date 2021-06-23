@@ -562,7 +562,7 @@ static int _algorithm_adaptive(struct oshmem_group_t *group, long *pSync)
             if (i == my_id)
                 continue;
 
-            if (!OSHMEM_PROC_ON_LOCAL_NODE(i)) {
+            if (!oshmem_proc_on_local_node(i)) {
                 local_peers_only = false;
                 break;
             }
