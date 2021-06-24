@@ -234,19 +234,6 @@ oshmem_group_t* oshmem_proc_group_create(int pe_start, int pe_stride, int pe_siz
     }
     group->proc_count = (int) count_pe;
     group->ompi_comm = NULL;
-
-    /* Prepare peers list */
-    OBJ_CONSTRUCT(&(group->peer_list), opal_list_t);
-    {
-        opal_namelist_t *peer = NULL;
-
-        for (i = 0; i < group->proc_count; i++) {
-            peer = OBJ_NEW(opal_namelist_t);
-            peer->name.jobid = group->proc_vpids[i];
-            peer->name.vpid = OMPI_PROC_MY_NAME->jobid;
-            opal_list_append(&(group->peer_list), &peer->super);
-        }
-    }
     group->id = opal_pointer_array_add(&oshmem_group_array, group);
 
     memset(&group->g_scoll, 0, sizeof(mca_scoll_base_group_scoll_t));
@@ -285,17 +272,6 @@ oshmem_proc_group_destroy_internal(oshmem_group_t* group, int scoll_unselect)
     OBJ_DESTRUCT(&_oshmem_local_vpids);
     if (group->proc_vpids) {
         free(group->proc_vpids);
-    }
-
-    /* Destroy peer list */
-    {
-        opal_list_item_t *item;
-
-        while (NULL != (item = opal_list_remove_first(&(group->peer_list)))) {
-            /* destruct the item (we constructed it), then free the memory chunk */
-            OBJ_RELEASE(item);
-        }
-        OBJ_DESTRUCT(&(group->peer_list));
     }
 
     /* reset the oshmem_group_array entry - make sure that the
