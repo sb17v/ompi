@@ -53,8 +53,8 @@ int oshmem_proc_init_set_local_vpids()
     wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
     wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
     /* retrieve the local peers */
-    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
-                          &wildcard_rank, &val, PMIX_STRING);
+    OPAL_MODEX_RECV_VALUE(ret, OPAL_PMIX_LOCAL_PEERS,
+                          &wildcard_rank, &val, OPAL_STRING);
 
     if (OPAL_SUCCESS == ret && NULL != val) {
         char **peers = opal_argv_split(val, ',');
