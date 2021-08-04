@@ -25,6 +25,7 @@
 
 #include "math.h"
 #include "opal/class/opal_list.h"
+#include "opal/class/opal_bitmap.h"
 #include "opal/mca/base/base.h"
 #include "opal/runtime/opal_progress.h"
 #include "opal/mca/threads/threads.h"
@@ -121,6 +122,49 @@ static void* shmem_opal_thread(void* argc)
 int oshmem_shmem_inglobalexit = 0;
 int oshmem_shmem_globalexit_status = -1;
 
+static opal_bitmap_t oshmem_local_peers;       /* Track the local peers */
+static uint32_t nodeid;
+
+/* This funtion will fetch the local_peers and the nodeid of current node */
+int oshmem_get_local_peers()
+{
+    opal_process_name_t wildcard_rank;
+    int ret = OSHMEM_SUCCESS;
+    char *val = NULL;
+
+    
+    ret = opal_bitmap_init(&oshmem_local_peers, ompi_comm_size(oshmem_comm_world));
+    if (OSHMEM_SUCCESS != ret) {
+        return ret;
+    }
+    /* Add all local peers first */
+    wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
+    wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
+    /* retrieve the local peers */
+    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
+                          &wildcard_rank, &val, PMIX_STRING);
+
+    if (OPAL_SUCCESS == ret && NULL != val) {
+        char **peers = opal_argv_split(val, ',');
+        int i;
+        free(val);
+        for (i=0; NULL != peers[i]; i++) {
+            ompi_vpid_t local_rank = strtoul(peers[i], NULL, 10);
+            opal_bitmap_set_bit(&oshmem_local_peers, local_rank);
+        }
+        opal_argv_free(peers);
+    }
+    printf("OPAL BITMAP STRING: %s\n", opal_bitmap_get_string(&oshmem_local_peers));
+
+    /* retrieve the nodeid */
+    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
+                          &wildcard_rank, &nodeid, PMIX_STRING);
+    if (OPAL_SUCCESS != ret || NULL == nodeid) {
+        return ret;
+    }
+    return OSHMEM_SUCCESS;
+}
+
 static void sighandler__SIGUSR1(int signum)
 {
     if (0 != oshmem_shmem_inglobalexit)
@@ -137,6 +181,7 @@ static void sighandler__SIGTERM(int signum)
 int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
 {
     int ret = OSHMEM_SUCCESS;
+    uint32_t nodeid;
 
     OMPI_TIMING_INIT(128);
 
@@ -149,6 +194,18 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         }
 
         PMPI_Comm_dup(MPI_COMM_WORLD, &oshmem_comm_world);
+        // TODO: 1. Fetch node local processes from PMIx
+        // TODO: 2. Get the nodeid from PMIX
+        // TODO: 3. Split the communicator
+        ret = oshmem_get_local_peers();
+        if(OSHMEM_SUCCESS != ret) {
+            printf("Failed getting local peer info\n");
+            fflush(stdout);
+            return ret;
+        }
+        printf("NODEID: %d OPAL BITMAP STRING: %s\n", nodeid, opal_bitmap_get_string(&oshmem_local_peers));
+
+
         OMPI_TIMING_NEXT("PMPI_Comm_dup");
 
         SHMEM_MUTEX_INIT(shmem_internal_mutex_alloc);

@@ -521,6 +521,7 @@ void mca_memheap_modex_recv_all(void)
     pmix_data_buffer_t *msg = NULL;
     void *send_buffer = NULL;
     char *rcv_buffer = NULL;
+    char *intra_node_recv_buffer = NULL;
     int size;
     int *rcv_size = NULL;
     int *rcv_n_transports = NULL;
@@ -631,7 +632,9 @@ void mca_memheap_modex_recv_all(void)
         MEMHEAP_ERROR("allgatherv failed");
         goto exit_fatal;
     }
-
+    // TODO: Here we get the mkeys for all processes. We need two groups here. One for inter-node communication, another for intra-node.
+    // We got both for inter and intra node here. But we want another allgatherv with node_local_comm to get the local mkeys. intra_recv_buffer and inter_recv_buffer.
+    // So before coming here our main task is to split the comm first. 2. Else, after getting the send buffer we can use check inside loop if it is local.
     OPAL_TIMING_ENV_NEXT(recv_all, "Perform mkey exchange");
 
     PMIX_DATA_BUFFER_LOAD(msg, rcv_buffer, buffer_size);
