@@ -95,6 +95,7 @@ long *preconnect_value = 0;
 int shmem_api_logger_output = -1;
 
 MPI_Comm oshmem_comm_world = {0};
+MPI_Comm oshmem_comm_node_local = {0};
 
 opal_thread_t *oshmem_mpi_main_thread = NULL;
 
@@ -122,19 +123,15 @@ static void* shmem_opal_thread(void* argc)
 int oshmem_shmem_inglobalexit = 0;
 int oshmem_shmem_globalexit_status = -1;
 
-static opal_bitmap_t oshmem_local_peers;       /* Track the local peers */
-static uint32_t nodeid;
-
 /* This funtion will fetch the local_peers and the nodeid of current node */
-int oshmem_get_local_peers()
+int oshmem_get_local_peers(opal_bitmap_t *oshmem_local_peers)
 {
     opal_process_name_t wildcard_rank;
     int ret = OSHMEM_SUCCESS;
     char *val = NULL;
 
-    
-    ret = opal_bitmap_init(&oshmem_local_peers, ompi_comm_size(oshmem_comm_world));
-    if (OSHMEM_SUCCESS != ret) {
+    ret = opal_bitmap_init(oshmem_local_peers, ompi_comm_size(oshmem_comm_world));
+    if (OPAL_SUCCESS != ret) {
         return ret;
     }
     /* Add all local peers first */
@@ -150,18 +147,29 @@ int oshmem_get_local_peers()
         free(val);
         for (i=0; NULL != peers[i]; i++) {
             ompi_vpid_t local_rank = strtoul(peers[i], NULL, 10);
-            opal_bitmap_set_bit(&oshmem_local_peers, local_rank);
+            opal_bitmap_set_bit(oshmem_local_peers, local_rank);
         }
         opal_argv_free(peers);
     }
-    printf("OPAL BITMAP STRING: %s\n", opal_bitmap_get_string(&oshmem_local_peers));
+    return OSHMEM_SUCCESS;
+}
+
+int oshmem_get_nodeid(uint32_t *nodeid)
+{
+    uint32_t u32, *u32ptr;
+    int ret = OSHMEM_SUCCESS;
+    opal_process_name_t *proc_name;
+
+    proc_name = &(oshmem_proc_local()->super.proc_name);
+    u32ptr = &u32;
 
     /* retrieve the nodeid */
-    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
-                          &wildcard_rank, &nodeid, PMIX_STRING);
-    if (OPAL_SUCCESS != ret || NULL == nodeid) {
+    OPAL_MODEX_RECV_VALUE_OPTIONAL(ret, PMIX_NODEID,
+                                   proc_name, &u32ptr, PMIX_UINT32);
+    if (OPAL_SUCCESS != ret || NULL == u32) {
         return ret;
     }
+    *nodeid = u32;
     return OSHMEM_SUCCESS;
 }
 
@@ -181,7 +189,10 @@ static void sighandler__SIGTERM(int signum)
 int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
 {
     int ret = OSHMEM_SUCCESS;
+    opal_bitmap_t oshmem_local_peers;  
     uint32_t nodeid;
+    size_t i;
+    size_t comm_world_size;
 
     OMPI_TIMING_INIT(128);
 
@@ -197,14 +208,15 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         // TODO: 1. Fetch node local processes from PMIx
         // TODO: 2. Get the nodeid from PMIX
         // TODO: 3. Split the communicator
-        ret = oshmem_get_local_peers();
+        OBJ_CONSTRUCT(&oshmem_local_peers, opal_bitmap_t);
+        ret = oshmem_get_local_peers(&oshmem_local_peers);
         if(OSHMEM_SUCCESS != ret) {
-            printf("Failed getting local peer info\n");
-            fflush(stdout);
             return ret;
         }
-        printf("NODEID: %d OPAL BITMAP STRING: %s\n", nodeid, opal_bitmap_get_string(&oshmem_local_peers));
-
+        ret = oshmem_get_nodeid(&nodeid);
+        if(OSHMEM_SUCCESS != ret) {
+            return ret;
+        }
 
         OMPI_TIMING_NEXT("PMPI_Comm_dup");
 
@@ -221,6 +233,18 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         OMPI_TIMING_IMPORT_OPAL_PREFIX("regular_mem", "mca_memheap_base_alloc_init");
         OMPI_TIMING_IMPORT_OPAL_PREFIX("device_mem", "mca_memheap_base_alloc_init");
 
+        comm_world_size = ompi_comm_size(oshmem_comm_world);
+        printf("Size of comm world: %d\n", comm_world_size);
+        for (i=0; i < comm_world_size; i++) {
+            if (oshmem_proc_on_local_node(i)) {
+                printf("color: %d key: %d\n", nodeid, i);
+                PMPI_Comm_split(oshmem_comm_world, nodeid, i, &oshmem_comm_node_local);
+            }
+        }
+
+        printf("World comm size: %d Splitted comm size: %d\n", comm_world_size, ompi_comm_size(oshmem_comm_node_local));
+        printf("NODEID: %d OPAL BITMAP STRING: %s\n", nodeid, opal_bitmap_get_string(&oshmem_local_peers));
+        
         if (OSHMEM_SUCCESS != ret) {
             return ret;
         }
