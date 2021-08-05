@@ -81,6 +81,7 @@ int oshmem_shmem_finalize(void)
          state < OMPI_MPI_STATE_FINALIZE_PAST_COMM_SELF_DESTRUCT) &&
         oshmem_shmem_globalexit_status == 0) {
         PMPI_Comm_free(&oshmem_comm_world);
+        PMPI_Comm_free(&oshmem_comm_node_local);
         ret = ompi_mpi_finalize();
     }
 

@@ -16,12 +16,18 @@
 #include "oshmem/runtime/runtime.h"
 #include "oshmem/runtime/params.h"
 
+int oshmem_shmem_set_exchange_communicator(MPI_Comm communicator)
+{
+    exchange_communicator = communicator;
+    return OSHMEM_SUCCESS;
+}
+
 int oshmem_shmem_allgather(void *send_buf, void *rcv_buf, int elem_size)
 {
     int rc;
 
     rc = PMPI_Allgather(send_buf, elem_size, MPI_BYTE,
-                        rcv_buf, elem_size, MPI_BYTE, oshmem_comm_world);
+                        rcv_buf, elem_size, MPI_BYTE, exchange_communicator);
 
     return rc;
 }
@@ -32,12 +38,12 @@ int oshmem_shmem_allgatherv(void *send_buf, void* rcv_buf, int send_count,
     int rc;
 
     rc = PMPI_Allgatherv(send_buf, send_count, MPI_BYTE,
-                         rcv_buf, rcv_size, displs, MPI_BYTE, oshmem_comm_world);
+                         rcv_buf, rcv_size, displs, MPI_BYTE, exchange_communicator);
 
     return rc;
 }
 
 void oshmem_shmem_barrier(void)
 {
-    PMPI_Barrier(oshmem_comm_world);
+    PMPI_Barrier(exchange_communicator);
 }

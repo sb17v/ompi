@@ -528,6 +528,10 @@ void mca_memheap_modex_recv_all(void)
     int *rcv_offsets = NULL;
     int rc = OSHMEM_SUCCESS;
     size_t buffer_size;
+    size_t comm_world_size;
+    size_t comm_local_size;
+    int local_proc_counter;
+    int *world_to_local_comm_map;
 
     OPAL_TIMING_ENV_INIT(recv_all);
 
@@ -587,7 +591,35 @@ void mca_memheap_modex_recv_all(void)
 
     OPAL_TIMING_ENV_NEXT(recv_all, "serialize data");
 
-
+    /* Set the communicator based on condition for exchange
+     * Exchange the local keys using oshmem_comm_node_local
+     * Else use oshmem_comm_world to exchange internode mkeys
+     */
+    // oshmem_shmem_set_exchange_communicator(oshmem_comm_node_local);
+    /* Checking rank mapping */
+    int world_comm_rank,local_comm_rank;
+    int world_comm_size,local_comm_size;
+    PMPI_Comm_rank(oshmem_comm_world, &world_comm_rank);
+    PMPI_Comm_size(oshmem_comm_world, &world_comm_size);
+    PMPI_Comm_rank(oshmem_comm_node_local, &local_comm_rank);
+    PMPI_Comm_size(oshmem_comm_node_local, &local_comm_size);
+    printf("World-Local Comm Rank: %d-%d World-Local Comm Size: %d-%d\n", world_comm_rank, local_comm_rank, world_comm_size, local_comm_size);
+    
+    comm_world_size = ompi_comm_size(oshmem_comm_world);
+    comm_local_size = ompi_comm_size(oshmem_comm_node_local);
+    world_to_local_comm_map = (int *)malloc(comm_local_size * sizeof(int));
+    local_proc_counter = 0;
+    for (i=0; i < comm_world_size; i++) {
+        if (oshmem_proc_on_local_node(i)) {
+            world_to_local_comm_map[local_proc_counter++] = i;
+        }
+    }
+    printf("local-world: ");
+    for(i = 0; i < comm_local_size; i++) {
+        printf(" %d->%d --", i, world_to_local_comm_map[i]);
+    }
+    printf("\n");
+    free(world_to_local_comm_map);
     /* we need to send num_transports and message sizes separately
      * since message sizes depend on types of btl used */
 

@@ -47,6 +47,8 @@ OSHMEM_DECLSPEC extern int oshmem_mpi_thread_provided;
 OSHMEM_DECLSPEC extern struct opal_thread_t *oshmem_mpi_main_thread;
 
 OSHMEM_DECLSPEC extern MPI_Comm oshmem_comm_world;
+extern MPI_Comm oshmem_comm_node_local;
+extern MPI_Comm exchange_communicator;
 
 typedef pthread_mutex_t shmem_internal_mutex_t;
 OSHMEM_DECLSPEC extern shmem_internal_mutex_t shmem_internal_mutex_alloc;
@@ -124,9 +126,19 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided);
 int oshmem_shmem_finalize(void);
 
 /**
+ * Set the communicator for internal allgather
+ * and allgatherv
+ * @param communicator 
+ * @return int 
+ */
+int oshmem_shmem_set_exchange_communicator(MPI_Comm communicator);
+
+/**
  * Abort SHMEM processes
  */
 OSHMEM_DECLSPEC int oshmem_shmem_abort(int errcode);
+
+
 
 /**
  * Allgather between all PEs

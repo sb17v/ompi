@@ -96,6 +96,7 @@ int shmem_api_logger_output = -1;
 
 MPI_Comm oshmem_comm_world = {0};
 MPI_Comm oshmem_comm_node_local = {0};
+MPI_Comm exchange_communicator = NULL;
 
 opal_thread_t *oshmem_mpi_main_thread = NULL;
 
@@ -122,37 +123,6 @@ static void* shmem_opal_thread(void* argc)
 
 int oshmem_shmem_inglobalexit = 0;
 int oshmem_shmem_globalexit_status = -1;
-
-/* This funtion will fetch the local_peers and the nodeid of current node */
-int oshmem_get_local_peers(opal_bitmap_t *oshmem_local_peers)
-{
-    opal_process_name_t wildcard_rank;
-    int ret = OSHMEM_SUCCESS;
-    char *val = NULL;
-
-    ret = opal_bitmap_init(oshmem_local_peers, ompi_comm_size(oshmem_comm_world));
-    if (OPAL_SUCCESS != ret) {
-        return ret;
-    }
-    /* Add all local peers first */
-    wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
-    wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
-    /* retrieve the local peers */
-    OPAL_MODEX_RECV_VALUE(ret, PMIX_LOCAL_PEERS,
-                          &wildcard_rank, &val, PMIX_STRING);
-
-    if (OPAL_SUCCESS == ret && NULL != val) {
-        char **peers = opal_argv_split(val, ',');
-        int i;
-        free(val);
-        for (i=0; NULL != peers[i]; i++) {
-            ompi_vpid_t local_rank = strtoul(peers[i], NULL, 10);
-            opal_bitmap_set_bit(oshmem_local_peers, local_rank);
-        }
-        opal_argv_free(peers);
-    }
-    return OSHMEM_SUCCESS;
-}
 
 int oshmem_get_nodeid(uint32_t *nodeid)
 {
@@ -189,7 +159,6 @@ static void sighandler__SIGTERM(int signum)
 int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
 {
     int ret = OSHMEM_SUCCESS;
-    opal_bitmap_t oshmem_local_peers;  
     uint32_t nodeid;
     size_t i;
     size_t comm_world_size;
@@ -205,20 +174,15 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         }
 
         PMPI_Comm_dup(MPI_COMM_WORLD, &oshmem_comm_world);
-        // TODO: 1. Fetch node local processes from PMIx
-        // TODO: 2. Get the nodeid from PMIX
-        // TODO: 3. Split the communicator
-        OBJ_CONSTRUCT(&oshmem_local_peers, opal_bitmap_t);
-        ret = oshmem_get_local_peers(&oshmem_local_peers);
-        if(OSHMEM_SUCCESS != ret) {
-            return ret;
-        }
+        OMPI_TIMING_NEXT("PMPI_Comm_dup");
+
+        /* Set the default communicator for exchange as oshmem_comm_world */
+        exchange_communicator = oshmem_comm_world;
+        /* Fetch Nodeid using PMIx */
         ret = oshmem_get_nodeid(&nodeid);
         if(OSHMEM_SUCCESS != ret) {
             return ret;
         }
-
-        OMPI_TIMING_NEXT("PMPI_Comm_dup");
 
         SHMEM_MUTEX_INIT(shmem_internal_mutex_alloc);
 
@@ -232,21 +196,18 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         OMPI_TIMING_IMPORT_OPAL("_memheap_create");
         OMPI_TIMING_IMPORT_OPAL_PREFIX("regular_mem", "mca_memheap_base_alloc_init");
         OMPI_TIMING_IMPORT_OPAL_PREFIX("device_mem", "mca_memheap_base_alloc_init");
-
-        comm_world_size = ompi_comm_size(oshmem_comm_world);
-        printf("Size of comm world: %d\n", comm_world_size);
-        for (i=0; i < comm_world_size; i++) {
-            if (oshmem_proc_on_local_node(i)) {
-                printf("color: %d key: %d\n", nodeid, i);
-                PMPI_Comm_split(oshmem_comm_world, nodeid, i, &oshmem_comm_node_local);
-            }
-        }
-
-        printf("World comm size: %d Splitted comm size: %d\n", comm_world_size, ompi_comm_size(oshmem_comm_node_local));
-        printf("NODEID: %d OPAL BITMAP STRING: %s\n", nodeid, opal_bitmap_get_string(&oshmem_local_peers));
-        
         if (OSHMEM_SUCCESS != ret) {
             return ret;
+        }
+
+        
+
+        /* Split the comm_world into local */
+        comm_world_size = ompi_comm_size(oshmem_comm_world);
+        for (i=0; i < comm_world_size; i++) {
+            if (oshmem_proc_on_local_node(i)) {
+                PMPI_Comm_split(oshmem_comm_world, nodeid, i, &oshmem_comm_node_local);
+            }
         }
         oshmem_shmem_initialized = true;
 
