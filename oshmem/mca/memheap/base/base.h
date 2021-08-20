@@ -188,6 +188,26 @@ static inline int memheap_find_segnum(void *va)
     return MEMHEAP_SEG_INVALID;
 }
 
+static inline int memheap_find_remote_segnum(void *va, int pe)
+{
+    int i;
+
+    for (i = 0; i < mca_memheap_base_map.n_segments; i++) {
+        map_segment_t *seg = memheap_find_seg(i);
+        if (seg) {
+            sshmem_mkey_t **mkeys_cache = seg->mkeys_cache;
+            if (mkeys_cache) {
+                if (mkeys_cache[pe]) {
+                    if ((va >= mkeys_cache[pe]->va_base) && (va < mkeys_cache[pe]->va_base + mkeys_cache[pe]->len)) {
+                        return i;
+                    }
+                }
+            }
+        }
+    }
+    return MEMHEAP_SEG_INVALID;
+}
+
 static inline void* memheap_va2rva(void* va, void* local_base, void* remote_base)
 {
     return (void*) (remote_base > local_base ?

@@ -571,7 +571,7 @@ void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe)
     if (!mkey->spml_context) {
         return;
     }
-    segno = memheap_find_segnum(mkey->va_base);
+    segno = memheap_find_remote_segnum(mkey->va_base, pe);
     ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
     rc = mca_spml_ucx_ctx_mkey_del(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
