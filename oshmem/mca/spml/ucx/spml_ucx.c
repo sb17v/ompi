@@ -566,12 +566,33 @@ void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe)
 {
     spml_ucx_mkey_t   *ucx_mkey;
     uint32_t segno;
-    int rc;
+    int i,rc;
 
     if (!mkey->spml_context) {
         return;
     }
-    segno = memheap_find_segnum(mkey->va_base);
+    segno = MEMHEAP_SEG_INVALID;
+    for (i = 0; i < mca_memheap_base_map.n_segments; i++) {
+        map_segment_t *seg = memheap_find_seg(i);
+        if (seg) {
+            sshmem_mkey_t **mkeys_cache = seg->mkeys_cache;
+            if (mkeys_cache) {
+                if (mkeys_cache[pe]) {
+                    if ((mkey->va_base >= mkeys_cache[pe]->va_base) &&
+                     (mkey->va_base < mkeys_cache[pe]->va_base + mkeys_cache[pe]->len)) {
+                        segno = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (MEMHEAP_SEG_INVALID == segno) {
+        SPML_UCX_ERROR("mca_spml_ucx_rmkey_free failed because of invalid \
+        segment number: %d\n", segno);
+    }
+
     ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
     rc = mca_spml_ucx_ctx_mkey_del(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
