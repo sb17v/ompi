@@ -80,6 +80,7 @@ OSHMEM_DECLSPEC sshmem_mkey_t * mca_memheap_base_get_cached_mkey_slow(shmem_ctx_
                                                                       void* va,
                                                                       int btl_id,
                                                                       void** rva);
+OSHMEM_DECLSPEC void mca_memheap_build_rmkeys(void);
 OSHMEM_DECLSPEC void mca_memheap_modex_recv_all(void);
 
 /* This function is for internal usage only
@@ -216,6 +217,18 @@ static inline void* memheap_va2rva(void* va, void* local_base, void* remote_base
             (uintptr_t)va + ((uintptr_t)remote_base - (uintptr_t)local_base) :
             (uintptr_t)va - ((uintptr_t)local_base - (uintptr_t)remote_base));
 }
+
+
+static inline void* memheap_va2rva_umr(void* va, void* local_base)
+{
+    return (void*) ((uintptr_t)va - ((uintptr_t)local_base));
+}
+
+static inline void* memheap_va2rva_same(void* va, void* local_base)
+{
+    return (void*) va;
+}
+
 
 static inline void *map_segment_va2rva(mkey_segment_t *seg, void *va)
 {

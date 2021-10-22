@@ -513,6 +513,21 @@ static int memheap_oob_get_mkeys(shmem_ctx_t ctx, int pe, uint32_t seg, sshmem_m
     return rc;
 }
 
+void mca_memheap_build_rmkeys(void)
+{
+    int i, j;
+    int max_ppn = oshmem_proc_find_max_ppn();
+    /* Iterate till max-ppn */
+    for ( i=0; i<max_ppn; i++) {
+        if (i == my_pe) {
+            continue;
+        }
+        for (j = 0; j < memheap_map->n_segments; j++) {
+            MCA_SPML_CALL(rmkey_build(oshmem_ctx_default, i, j));
+        }
+    }
+}
+
 void mca_memheap_modex_recv_all(void)
 {
     int i;
@@ -774,6 +789,8 @@ void mkey_segment_init(mkey_segment_t *seg, sshmem_mkey_t *mkey, uint32_t segno)
     assert(NULL != s);
     seg->super.va_base = s->super.va_base;
     seg->super.va_end  = s->super.va_end;
+#ifndef SPML_UCX_USE_SYMMETRIC_KEY
     seg->rva_base      = mkey->va_base;
+#endif
 }
 

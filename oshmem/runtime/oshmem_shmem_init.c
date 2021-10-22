@@ -178,6 +178,16 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         /* this is a collective op, implies barrier */
         MCA_MEMHEAP_CALL(get_all_mkeys());
         OMPI_TIMING_NEXT("get_all_mkeys()");
+/* Warning: Fallback logic needs to be called from here
+ * If the feaure is enabled call rmkey build without invoking 
+ * modex exchange+unpack
+ * ** We need to call modex exachange between local PEs only
+ * for shared memory case - Just change the loop inside modex recv all
+ *
+ */
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+        OMPI_TIMING_IMPORT_OPAL("mca_memheap_build_rmkeys");
+#endif
         OMPI_TIMING_IMPORT_OPAL("mca_memheap_modex_recv_all");
 
         oshmem_shmem_preconnect_all();

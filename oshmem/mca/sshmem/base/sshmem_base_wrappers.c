@@ -80,6 +80,9 @@ void
 shmem_ds_reset(map_segment_t *ds_buf)
 {
     MAP_SEGMENT_RESET_FLAGS(ds_buf);
+    /* Comments: we know for sure this is done during segment create internal.
+     * Seems Like seg_id is not set anywhere
+     */
     ds_buf->seg_id = MAP_SEGMENT_SHM_INVALID;
     ds_buf->super.va_base = 0;
     ds_buf->super.va_end = 0;

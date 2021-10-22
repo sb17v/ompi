@@ -97,6 +97,8 @@ OSHMEM_DECLSPEC int oshmem_proc_init(void);
  */
 OSHMEM_DECLSPEC int oshmem_proc_finalize(void);
 
+int oshmem_proc_find_max_ppn(void);
+int oshmem_proc_get_local_rank(int global_rank);
 /**
  * Returns a pointer to the local process
  *

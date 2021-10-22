@@ -112,18 +112,35 @@ segment_create_internal(map_segment_t *ds_buf, void *address, size_t size,
     ucp_mem_map_params_t mem_map_params;
     ucp_mem_h mem_h;
     ucs_status_t status;
+    int my_pe;
+    volatile int fl;
 
+    while(fl) {
+        sleep(1);
+    }
+    
     assert(ds_buf);
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    my_pe = oshmem_my_proc_id();
+#endif
 
     /* init the contents of map_segment_t */
     shmem_ds_reset(ds_buf);
-
+    ds_buf.seg_id ++;
+    
     mem_map_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
                                 UCP_MEM_MAP_PARAM_FIELD_LENGTH |
                                 UCP_MEM_MAP_PARAM_FIELD_FLAGS;
-
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    printf("Inside the sym key block.. \n");
+    mem_map_params.field_mask |= UCP_MEM_MAP_PARAM_FIELD_MKEY_INDEX;
+#endif
     mem_map_params.address    = address;
     mem_map_params.length     = size;
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    printf("Registering segment for segno: %d pe: %d with key index: %d\n", ds_buf.seg_id, my_pe, spml_ucx_get_mkey_index(oshmem_proc_get_local_rank(my_pe), ds_buf.seg_id));
+    mem_map_params.mkey_index = spml_ucx_get_mkey_index(oshmem_proc_get_local_rank(my_pe), ds_buf.seg_id);
+#endif
     mem_map_params.flags      = flags;
 
     status = ucp_mem_map(spml->ucp_context, &mem_map_params, &mem_h);

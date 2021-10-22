@@ -47,6 +47,7 @@ BEGIN_C_DECLS
 #define SPML_UCX_TRANSP_IDX 0
 #define SPML_UCX_TRANSP_CNT 1
 #define SPML_UCX_SERVICE_SEG 0
+#define SPML_UCX_USE_SYMMETRIC_KEY 1
 
 /**
  * UCX SPML module
@@ -57,15 +58,27 @@ struct spml_ucx_mkey {
 }; 
 typedef struct spml_ucx_mkey spml_ucx_mkey_t;
 
+struct spml_ucx_symmetric_mkey {
+    ucp_rkey_h sym_rkey;
+    // Check if we need memh here - No as we will keep the key for shm access
+};
+typedef struct spml_ucx_symmetric_mkey spml_ucx_symmetric_mkey_t;
+
 struct spml_ucx_cached_mkey {
-    mkey_segment_t   super;
-    spml_ucx_mkey_t  key;
+    mkey_segment_t             super;
+    spml_ucx_mkey_t            key;
+    int                        is_sym_key;      /* Flag to notify symmetric key functionality is enabled for remote data ops */
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    spml_ucx_symmetric_mkey_t sym_key;
+    // symmetric_mkey_segment_t   sym_key_segment; /* contains a array of size npes holding the RVAs if they are not same, flag - is_same_va*/
+                                                // This array is not required which contains the segments information
+#endif
 };
 typedef struct spml_ucx_cached_mkey spml_ucx_cached_mkey_t;
 
 struct ucp_peer {
     ucp_ep_h                 ucp_conn;
-    spml_ucx_cached_mkey_t **mkeys;
+    spml_ucx_cached_mkey_t **mkeys;     /* Comment: Keep it as a generic conainer*/
     size_t                   mkeys_cnt;
 };
 typedef struct ucp_peer ucp_peer_t;
@@ -188,7 +201,7 @@ extern sshmem_mkey_t *mca_spml_ucx_register(void* addr,
 extern int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys);
 
 extern void mca_spml_ucx_memuse_hook(void *addr, size_t length);
-
+extern void mca_spml_ucx_rmkey_build(shmem_ctx_t ctx, uint32_t segno, int pe);
 extern void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t segno, int pe, int tr_id);
 extern void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe);
 extern void *mca_spml_ucx_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *, int pe);
@@ -208,6 +221,12 @@ int mca_spml_ucx_peer_mkey_cache_add(ucp_peer_t *ucp_peer, int index);
 int mca_spml_ucx_peer_mkey_cache_del(ucp_peer_t *ucp_peer, int segno);
 void mca_spml_ucx_peer_mkey_cache_release(ucp_peer_t *ucp_peer);
 void mca_spml_ucx_peer_mkey_cache_init(mca_spml_ucx_ctx_t *ucx_ctx, int pe);
+
+//TODO: The displacement should be fixed by max PPN not by num local peers
+static inline int spml_ucx_get_mkey_index(int pe, int seg_id)
+{
+    return (pe + (seg_id * oshmem_proc_find_max_ppn()));
+}
 
 static inline int
 mca_spml_ucx_peer_mkey_get(ucp_peer_t *ucp_peer, int index, spml_ucx_cached_mkey_t **out_rmkey)
@@ -242,8 +261,36 @@ int mca_spml_ucx_ctx_mkey_cache(mca_spml_ucx_ctx_t *ucx_ctx, sshmem_mkey_t *mkey
 int mca_spml_ucx_ctx_mkey_add(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, sshmem_mkey_t *mkey, spml_ucx_mkey_t **ucx_mkey);
 int mca_spml_ucx_ctx_mkey_del(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t *ucx_mkey);
 
+// Need an additional function to access predefined mkeys from same ucx_cached_mkey
+static inline int
+mca_spml_ucx_ctx_predefined_mkey_by_seg(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_symmetric_mkey_t **sym_mkey)
+{
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
+    rc = _mca_spml_ucx_ctx_mkey_by_seg(ucx_ctx, pe, segno, ucx_cached_mkey)
+    if (OSHMEM_SUCCESS != rc){
+        return rc;
+    }
+    *sym_mkey = &(ucx_cached_mkey->sym_key);
+    return rc;
+
+}
+
 static inline int
 mca_spml_ucx_ctx_mkey_by_seg(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+{
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+    int rc;
+    rc = _mca_spml_ucx_ctx_mkey_by_seg(ucx_ctx, pe, segno, ucx_cached_mkey)
+    if (OSHMEM_SUCCESS != rc){
+        return rc;
+    }
+    *mkey = &(ucx_cached_mkey->key);
+    return rc;
+}
+
+static inline int
+_mca_spml_ucx_ctx_mkey_by_seg(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_cached_mkey_t *ucx_cached_mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
@@ -253,25 +300,57 @@ mca_spml_ucx_ctx_mkey_by_seg(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno
     if (OSHMEM_SUCCESS != rc) {
         return rc;
     }
-    *mkey = &(ucx_cached_mkey->key);
     return OSHMEM_SUCCESS;
+}
+
+static inline spml_ucx_symmetric_mkey_t *
+mca_spml_ucx_ctx_predefined_mkey_by_va(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
+{
+    spml_ucx_cached_mkey_t *mkey = _mca_spml_ucx_ctx_mkey_by_va(ctx, pe, va, rva, module);
+    if (NULL != mkey)
+    {
+        return mkey->sym_key;
+    }
+    return NULL;
+
 }
 
 static inline spml_ucx_mkey_t * 
 mca_spml_ucx_ctx_mkey_by_va(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
 {
+    spml_ucx_cached_mkey_t *mkey = _mca_spml_ucx_ctx_mkey_by_va(ctx, pe, va, rva, module);
+    if (NULL != mkey)
+    {
+        return mkey->key;
+    }
+    return NULL;
+}
+
+/* TODO: Break this function if required*/
+static inline spml_ucx_cached_mkey_t * 
+_mca_spml_ucx_ctx_mkey_by_va(shmem_ctx_t ctx, int pe, void *va, void **rva, mca_spml_ucx_t* module)
+{
     spml_ucx_cached_mkey_t **mkey;
     mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
     size_t i;
-
+    // Change here if the flag is enabled
+    /* If flag is enabled, fetch value from 
+     * 
+     */
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    int local_pe;
+    local_pe = oshmem_proc_get_local_rank(pe);
+    mkey = ucx_ctx->ucp_peers[local_pe].mkeys;
+#else
     mkey = ucx_ctx->ucp_peers[pe].mkeys;
+#endif
     for (i = 0; i < ucx_ctx->ucp_peers[pe].mkeys_cnt; i++) {
         if (NULL == mkey[i]) {
             continue;
         }
         if (OPAL_LIKELY(map_segment_is_va_in(&mkey[i]->super.super, va))) {
             *rva = map_segment_va2rva(&mkey[i]->super, va);
-            return &mkey[i]->key;
+            return &mkey[i];
         }
     }
     return NULL;

@@ -66,6 +66,7 @@ mca_spml_ucx_t mca_spml_ucx = {
         .spml_test          = mca_spml_base_test,
         .spml_fence         = mca_spml_ucx_fence,
         .spml_quiet         = mca_spml_ucx_quiet,
+        .spml_rmkey_build   = mca_spml_ucx_rmkey_build,
         .spml_rmkey_unpack  = mca_spml_ucx_rmkey_unpack,
         .spml_rmkey_free    = mca_spml_ucx_rmkey_free,
         .spml_rmkey_ptr     = mca_spml_ucx_rmkey_ptr,
@@ -176,7 +177,35 @@ void mca_spml_ucx_peer_mkey_cache_release(ucp_peer_t *ucp_peer)
     }
 }
 
+int mca_spml_ucx_ctx_predefined_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_symmetric_mkey_t **sym_mkey)
+{
+    int rc;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+
+    rc = _mca_spml_ucx_ctx_mkey_new(ucx_ctx, pe, segno, ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_predefined_mkey_new failed");
+        return rc;
+    }
+    *sym_mkey = &(ucx_cached_mkey->sym_key);
+    return rc;
+}
+
 int mca_spml_ucx_ctx_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_mkey_t **mkey)
+{
+    int rc;
+    spml_ucx_cached_mkey_t *ucx_cached_mkey;
+
+    rc = _mca_spml_ucx_ctx_mkey_new(ucx_ctx, pe, segno, ucx_cached_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_new failed");
+        return rc;
+    }
+    *mkey = &(ucx_cached_mkey->key);
+    return rc;
+}
+
+int _mca_spml_ucx_ctx_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, spml_ucx_cached_mkey_t *ucx_cached_mkey)
 {
     ucp_peer_t *ucp_peer;
     spml_ucx_cached_mkey_t *ucx_cached_mkey;
@@ -190,7 +219,6 @@ int mca_spml_ucx_ctx_mkey_new(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segn
     if (OSHMEM_SUCCESS != rc) {
         return rc;
     }
-    *mkey = &(ucx_cached_mkey->key);
     return OSHMEM_SUCCESS;
 }
 
@@ -206,7 +234,41 @@ int mca_spml_ucx_ctx_mkey_cache(mca_spml_ucx_ctx_t *ucx_ctx, sshmem_mkey_t *mkey
         SPML_UCX_ERROR("mca_spml_ucx_peer_mkey_get failed");
         return rc;
     }
+    // Comment: Segment->rva_base is set in this step using mkey->va_base
     mkey_segment_init(&ucx_cached_mkey->super, mkey, segno);
+    return OSHMEM_SUCCESS;
+}
+
+// TODO: MKEY add is the only place unpack is called, use rkey_build here in same place
+int mca_spml_ucx_ctx_predefined_mkey_add(mca_spml_ucx_ctx_t *ucx_ctx, int pe, uint32_t segno, ucp_mem_h mem_h, spml_ucx_symmetric_mkey_t **ucx_sym_mkey)
+{
+    int rc;
+    ucs_status_t err;
+    int rank = oshmem_my_proc_id();
+    volatile int flag = 1;
+
+    rc = mca_spml_ucx_ctx_predefined_mkey_new(ucx_ctx, pe, segno, ucx_sym_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_predefined_mkey_new failed");
+        return rc;
+    }
+    // TODO: Check where the mem_h value is set - during registration
+    printf("UCP rkey build for index = %u\n", spml_ucx_get_mkey_index(pe, segno));
+
+    while (flag) {
+        sleep(1);
+    }
+
+    err = ucp_rkey_build(mca_spml_ucx.ucp_context, mem_h, spml_ucx_get_mkey_index(pe, segno), &((*ucx_sym_mkey)->rkey));
+    if (UCS_OK != err) {
+        SPML_UCX_ERROR("failed to build rkey: %s", ucs_status_string(err));
+        return OSHMEM_ERROR;
+    }
+    rc = mca_spml_ucx_ctx_mkey_cache(ucx_ctx, NULL, segno, pe);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_cache failed");
+        return rc;
+    }
     return OSHMEM_SUCCESS;
 }
 
@@ -561,6 +623,29 @@ error:
     return rc;
 
 }
+// Comments: Intend to free unpacked keys
+void mca_spml_ucx_predefined_rmkey_free()
+{
+    int pe, seg;
+    int rc;
+    mca_spml_ucx_ctx_t *ctx = &mca_spml_ucx_ctx_default;
+    int max_ppn = oshmem_proc_find_max_ppn();
+    for (pe = 0; pe < max_ppn; ++pe) {
+        for (seg = 0; seg < memheap_map->n_segments; seg++) {
+            rc = mca_spml_ucx_ctx_mkey_by_seg(ctx, pe, seg, &ucx_mkey);
+            if (OSHMEM_SUCCESS != rc) {
+                SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_by_seg failed");
+            } else {
+                if (ucx_mkey->rkey != NULL) {
+                    rc = mca_spml_ucx_ctx_mkey_del(ctx, pe, seg, ucx_mkey);
+                    if (OSHMEM_SUCCESS != rc) {
+                        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_del failed");
+                    }
+                }
+            }
+        }
+    }
+}
 
 void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe)
 {
@@ -579,6 +664,12 @@ void mca_spml_ucx_rmkey_free(sshmem_mkey_t *mkey, int pe)
     }
 
     ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
+    /* This part is destroying the unpacked remote keys
+     * We will not invoke rmkey_free instead invoke pre-defined rmkey_free
+     * From inside pre-defined rm key free invoke 
+     * 
+     * --- TODO --
+     */
     rc = mca_spml_ucx_ctx_mkey_del(&mca_spml_ucx_ctx_default, pe, segno, ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
         SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_del failed\n");
@@ -590,6 +681,11 @@ void *mca_spml_ucx_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *mkey, int pe)
 #if (((UCP_API_MAJOR >= 1) && (UCP_API_MINOR >= 3)) || (UCP_API_MAJOR >= 2))
     void *rva;
     ucs_status_t err;
+    /* Look spml_context is directly accessed here for fast path 
+     * to fetch unpacked mkey from mkey structure
+     * We cannot remove it as it is part of shmem api
+     * else just fetch it another way if flag is enbled
+     */
     spml_ucx_mkey_t *ucx_mkey = (spml_ucx_mkey_t *)(mkey->spml_context);
 
     err = ucp_rkey_ptr(ucx_mkey->rkey, (uint64_t)dst_addr, &rva);
@@ -602,6 +698,25 @@ void *mca_spml_ucx_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *mkey, int pe)
 #endif
 }
 
+// TODO: It should accept mem_h or check if the ctx contain mem_h or not for local mkeys
+void mca_spml_ucx_rmkey_build(shmem_ctx_t ctx, uint32_t segno, int pe)
+{
+    spml_ucx_mkey_t   *ucx_mkey;
+    mca_spml_ucx_ctx_t *ucx_ctx = (mca_spml_ucx_ctx_t *)ctx;
+    int rc;
+    rc = mca_spml_ucx_ctx_predefined_mkey_add(ucx_ctx, pe, segno, memheap_map->mem_segs[segno]->mem_h, &ucx_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_predefined_mkey_add failed");
+        goto error_fatal;
+    }
+    return;
+
+error_fatal:
+    oshmem_shmem_abort(-1);
+    return;
+
+}
+
 void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t segno, int pe, int tr_id)
 {
     spml_ucx_mkey_t   *ucx_mkey;
@@ -610,7 +725,7 @@ void mca_spml_ucx_rmkey_unpack(shmem_ctx_t ctx, sshmem_mkey_t *mkey, uint32_t se
 
     rc = mca_spml_ucx_ctx_mkey_add(ucx_ctx, pe, segno, mkey, &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_cache failed");
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_add failed");
         goto error_fatal;
     }
     if (ucx_ctx == &mca_spml_ucx_ctx_default) {
@@ -664,6 +779,7 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     sshmem_mkey_t *mkeys;
     ucs_status_t status;
     spml_ucx_mkey_t   *ucx_mkey;
+    spml_ucx_symmetric_mkey_t *ucx_sym_mkey;
     size_t len;
     ucp_mem_map_params_t mem_map_params;
     uint32_t segno;
@@ -672,8 +788,13 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     int my_pe = oshmem_my_proc_id();
     int rc;
     ucp_mem_h mem_h;
+    volatile int fla = 1;
+    while(fla) {
+        sleep(1);
+    }
 
     *count = 0;
+    /* Mkeys are allocated here to hold local - it will get allocated for local shm accesses */
     mkeys = (sshmem_mkey_t *) calloc(1, sizeof(*mkeys));
     if (!mkeys) {
         return NULL;
@@ -697,8 +818,15 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
         mem_map_params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
                                     UCP_MEM_MAP_PARAM_FIELD_LENGTH |
                                     UCP_MEM_MAP_PARAM_FIELD_FLAGS;
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+        mem_map_params.field_mask |= UCP_MEM_MAP_PARAM_FIELD_MKEY_INDEX;
+#endif
         mem_map_params.address    = addr;
         mem_map_params.length     = size;
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+        // TODO: This portion needs to be fixed, do not pass the my_pe directly
+        mem_map_params.mkey_index = spml_ucx_get_mkey_index(oshmem_proc_get_local_rank(my_pe), segno);
+#endif
         mem_map_params.flags      = flags;
 
         status = ucp_mem_map(mca_spml_ucx.ucp_context, &mem_map_params, &mem_h);
@@ -711,6 +839,7 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
         mem_h  = ctx->ucp_memh;
     }
 
+    // Step: Pack the local mkey
     status = ucp_rkey_pack(mca_spml_ucx.ucp_context, mem_h,
                            &mkeys[SPML_UCX_TRANSP_IDX].u.data, &len);
     if (UCS_OK != status) {
@@ -725,15 +854,23 @@ sshmem_mkey_t *mca_spml_ucx_register(void* addr,
     mkeys[SPML_UCX_TRANSP_IDX].len     = len;
     mkeys[SPML_UCX_TRANSP_IDX].va_base = addr;
     *count = SPML_UCX_TRANSP_CNT;
+    // Step: Allocate a buffer to hold the unpacked key and unpack the local keys
     rc = mca_spml_ucx_ctx_mkey_add(&mca_spml_ucx_ctx_default, my_pe, segno, &mkeys[SPML_UCX_TRANSP_IDX], &ucx_mkey);
     if (OSHMEM_SUCCESS != rc) {
-        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_cache failed");
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_add failed");
         goto error_unmap;
     }
     ucx_mkey->mem_h = mem_h;
     mkeys[SPML_UCX_TRANSP_IDX].spml_context = ucx_mkey;
     return mkeys;
-
+#ifdef SPML_UCX_USE_SYMMETRIC_KEY
+    // Step : pass the mem_h here
+    rc = mca_spml_ucx_ctx_predefined_mkey_add(&mca_spml_ucx_ctx_default, my_pe, segno, mem_h, &ucx_sym_mkey);
+    if (OSHMEM_SUCCESS != rc) {
+        SPML_UCX_ERROR("mca_spml_ucx_ctx_predefined_mkey_add failed");
+        goto error_unmap;
+    }
+#endif
 error_unmap:
     ucp_mem_unmap(mca_spml_ucx.ucp_context, ucx_mkey->mem_h);
 error_out:
@@ -742,6 +879,7 @@ error_out:
     return NULL ;
 }
 
+// Comment: This will not get hit in case we use different clean up function
 int mca_spml_ucx_deregister(sshmem_mkey_t *mkeys)
 {
     spml_ucx_mkey_t   *ucx_mkey;

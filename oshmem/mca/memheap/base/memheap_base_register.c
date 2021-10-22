@@ -111,7 +111,8 @@ static int _reg_segment(map_segment_t *s, int *num_btl)
 
     nprocs = oshmem_num_procs();
     my_pe = oshmem_my_proc_id();
-
+    /* Allocate memory for mkeys_cache only if the flag is not specified */
+#ifndef SPML_UCX_USE_SYMMETRIC_KEY
     s->mkeys_cache = (sshmem_mkey_t **) calloc(nprocs,
                                                  sizeof(sshmem_mkey_t *));
     if (NULL == s->mkeys_cache) {
@@ -124,6 +125,7 @@ static int _reg_segment(map_segment_t *s, int *num_btl)
                         (uintptr_t)s->super.va_end - (uintptr_t)s->super.va_base,
                         s->seg_id,
                         num_btl));
+        /* This checking is required in regular flow otherwise we just need to call register function */
         if (NULL == s->mkeys) {
             free(s->mkeys_cache);
             s->mkeys_cache = NULL;
@@ -132,11 +134,15 @@ static int _reg_segment(map_segment_t *s, int *num_btl)
             rc = OSHMEM_ERROR;
         }
     }
-
     if (OSHMEM_SUCCESS == rc) {
         s->mkeys_cache[my_pe] = s->mkeys;
         MAP_SEGMENT_SET_VALID(s);
     }
-
+#else
+    MCA_SPML_CALL(register((void *)(unsigned long)s->super.va_base,
+                        (uintptr_t)s->super.va_end - (uintptr_t)s->super.va_base,
+                        s->seg_id,
+                        num_btl));
+#endif
     return rc;
 }

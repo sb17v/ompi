@@ -398,11 +398,13 @@ static void _ctx_cleanup(mca_spml_ucx_ctx_t *ctx)
 
     for (i = 0; i < nprocs; ++i) {
         for (j = 0; j < memheap_map->n_segments; j++) {
+            // Comments: We need to fetch ucx_sym_mkey here also if the flag is enabled
             rc = mca_spml_ucx_ctx_mkey_by_seg(ctx, i, j, &ucx_mkey);
             if (OSHMEM_SUCCESS != rc) {
                 SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_by_seg failed");
             } else {
                 if (ucx_mkey->rkey != NULL) {
+                    // Comments: Invoke mca_spml_ctx_predefined_mkey_del in this position if flag is enabled
                     rc = mca_spml_ucx_ctx_mkey_del(ctx, i, j, ucx_mkey);
                     if (OSHMEM_SUCCESS != rc) {
                         SPML_UCX_ERROR("mca_spml_ucx_ctx_mkey_del failed");

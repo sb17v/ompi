@@ -104,17 +104,27 @@ typedef struct map_base_segment {
 
 typedef struct mkey_segment {
     map_base_segment_t  super;
+#ifndef SPML_UCX_USE_SYMMETRIC_KEY    /* Assuming 0 for all rva_bases */
     void               *rva_base;     /* base va on remote pe */
+#endif
 } mkey_segment_t;
 
 typedef struct segment_allocator segment_allocator_t;
+
+// typedef struct symmetric_mkey_segment{
+//     int                  is_same_va;    /* Allocate memory for rva_bases if this flag is false */
+//     void               **rva_bases;     /* base va on remote pe for symmetric mkey usage */
+// } symmetric_mkey_segment_t;
 
 typedef struct map_segment {
     map_base_segment_t   super;
     sshmem_mkey_t      **mkeys_cache;    /* includes remote segment bases in va_base */
     sshmem_mkey_t       *mkeys;          /* includes local segment bases in va_base */
     segment_flag_t       flags;          /* enable/disable flag */
-    int                  seg_id;
+    int                  seg_id;         /* TODO: Assume this field will store segment number 
+                                          * incase no unique identifier present and 
+                                          * ucx path is invoked
+                                          */
     size_t               seg_size;       /* length of the segment */
     segment_type_t       type;           /* type of the segment */
     long                 alloc_hints;    /* allocation hints this segment supports */

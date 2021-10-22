@@ -32,12 +32,68 @@
 
 static opal_mutex_t oshmem_proc_lock;
 static opal_bitmap_t _oshmem_local_vpids;       /* Track the vpids in local node */
+static int *global_to_local_pe_mapping;
+
+int oshmem_proc_create_global_to_local_translation()
+{
+    // TODO: get number of nodes
+    opal_process_name_t wildcard_rank;
+    uint32_t nnodes, node_id, *u32;
+    int ret, npes, global_rank;
+    int *local_rank_temp;
+
+    wildcard_rank.jobid = OMPI_PROC_MY_NAME->jobid;
+    wildcard_rank.vpid = OMPI_NAME_WILDCARD->vpid;
+
+    npes = ompi_comm_size(oshmem_comm_world);
+    u32 = &nnodes;
+    OPAL_MODEX_RECV_VALUE(ret, PMIX_NUM_NODES, &wildcard_rank, &u32, PMIX_UINT32);
+    if (OPAL_SUCCESS != ret) {
+        return OSHMEM_ERROR;
+    }
+
+    global_to_local_pe_mapping = calloc(npes, sizeof(int));
+    local_rank_temp = calloc(nnodes, sizeof(int));
+
+    for (global_rank=0; global_rank < npes; global_rank++) {
+        wildcard_rank.vpid = global_rank;
+        u32 = &node_id;
+        OPAL_MODEX_RECV_VALUE(ret, PMIX_NODEID, &wildcard_rank, &u32, PMIX_UINT32);
+        global_to_local_pe_mapping[global_rank] = local_rank_temp[node_id]++; 
+    }
+
+    free(local_rank_temp);
+    // // Todo: Print mapping -
+    // for (global_rank=0; global_rank < npes; global_rank ++) {
+    //     printf("local rank [%d] = %d\n", global_rank, global_to_local_pe_mapping[global_rank]);
+    // }
+    // printf("\n\n");
+    return OSHMEM_SUCCESS;
+}
+
+int oshmem_proc_get_local_rank(int global_rank)
+{
+    return global_to_local_pe_mapping[global_rank];
+}
+
+int oshmem_proc_find_max_ppn(void)
+{
+    int i, max_ppn = 0;
+    int npes = ompi_comm_size(oshmem_comm_world);
+    for(i=0; i < npes; i++) {
+        if (global_to_local_pe_mapping[i] > max_ppn) {
+            max_ppn = global_to_local_pe_mapping[i];
+        }
+    }
+    return (max_ppn + 1);
+}
+
 int oshmem_proc_init_set_local_vpids()
 {
     opal_process_name_t wildcard_rank;
     int ret = OMPI_SUCCESS;
     char *val = NULL;
-    
+
     ret = opal_bitmap_init(&_oshmem_local_vpids, ompi_comm_size(oshmem_comm_world));
     if (OSHMEM_SUCCESS != ret) {
         return ret;
@@ -74,6 +130,11 @@ int oshmem_proc_init(void)
     OBJ_CONSTRUCT(&_oshmem_local_vpids, opal_bitmap_t);
 
     ret = oshmem_proc_init_set_local_vpids();
+    if(OSHMEM_SUCCESS != ret) {
+        return ret;
+    }
+
+    ret = oshmem_proc_create_global_to_local_translation();
     if(OSHMEM_SUCCESS != ret) {
         return ret;
     }

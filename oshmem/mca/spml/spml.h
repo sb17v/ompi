@@ -128,6 +128,11 @@ typedef int (*mca_spml_base_module_test_fn_t)(void* addr,
                                               int *out_value);
 
 /**
+ * build remote mkey - experimental
+ */
+typedef void (*mca_spml_base_module_mkey_build_fn_t)(shmem_ctx_t ctx, uint32_t segno, int remote_pe);
+
+/**
  * deserialize remote mkey
  *
  * @param mkey remote mkey
@@ -406,6 +411,7 @@ struct mca_spml_base_module_1_0_0_t {
     mca_spml_base_module_quiet_fn_t spml_quiet;
 
     mca_spml_base_module_mkey_unpack_fn_t spml_rmkey_unpack;
+    mca_spml_base_module_mkey_build_fn_t  spml_rmkey_build;
     mca_spml_base_module_mkey_free_fn_t   spml_rmkey_free;
     mca_spml_base_module_mkey_ptr_fn_t    spml_rmkey_ptr;
 
