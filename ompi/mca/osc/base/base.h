@@ -44,6 +44,9 @@ int ompi_osc_base_find_available(bool enable_progress_threads,
 void ompi_osc_base_set_memory_alignment(struct opal_info_t *info,
                                         size_t *memory_alignment);
 
+/* DPU offload related exposed endpoints to upper layer - keep in osc_base_init file */
+int ompi_osc_base_connect_all_dpus(ompi_communicator_t *comm);
+
 int ompi_osc_base_select(ompi_win_t *win,
                          void **base,
                          size_t size,

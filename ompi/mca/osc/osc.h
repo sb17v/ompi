@@ -153,6 +153,7 @@ typedef int (*ompi_osc_base_component_select_fn_t)(struct ompi_win_t *win,
                                                    int flavor,
                                                    int *model);
 
+typedef int (*ompi_osc_base_component_connect_all_dpus_fn_t)(struct ompi_communicator_t* comm);
 /**
  * OSC component interface
  *
@@ -173,6 +174,8 @@ struct ompi_osc_base_component_2_0_0_t {
     ompi_osc_base_component_select_fn_t osc_select;
     /* Finalize the component infrastructure */
     ompi_osc_base_component_finalize_fn_t osc_finalize;
+    /* Function related to DPU offload functionality */
+    ompi_osc_base_component_connect_all_dpus_fn_t osc_connect_all_dpus;
 };
 typedef struct ompi_osc_base_component_2_0_0_t ompi_osc_base_component_2_0_0_t;
 typedef ompi_osc_base_component_2_0_0_t ompi_osc_base_component_t;

@@ -85,3 +85,50 @@ ompi_osc_base_select(ompi_win_t *win,
     return best_component->osc_select(win, base, size, disp_unit, comm,
                                       win->super.s_info, flavor, model);
 }
+
+static ompi_osc_base_component_t *_get_best_component(ompi_communicator_t *comm)
+{
+    opal_list_item_t *item;
+    ompi_osc_base_component_t *best_component = NULL;
+    int best_priority = -1, priority;
+
+    if (opal_list_get_size(&ompi_osc_base_framework.framework_components) <= 0) {
+        /* we don't have any components to support us... */
+        return OMPI_ERR_NOT_SUPPORTED;
+    }
+
+    for (item = opal_list_get_first(&ompi_osc_base_framework.framework_components) ;
+         item != opal_list_get_end(&ompi_osc_base_framework.framework_components) ;
+         item = opal_list_get_next(item)) {
+        ompi_osc_base_component_t *component = (ompi_osc_base_component_t*)
+            ((mca_base_component_list_item_t*) item)->cli_component;
+
+        priority = component->osc_query(NULL, NULL, 0, 0, comm,
+                                        NULL, -1);
+        if (priority < 0) {
+            continue;
+        }
+
+        if (priority > best_priority) {
+            best_component = component;
+            best_priority = priority;
+        }
+    }
+
+    return best_component;
+}
+
+int ompi_osc_base_connect_all_dpus(ompi_communicator_t *comm)
+{
+    int ret;
+    ompi_osc_base_component_t *component;
+    
+    component = _get_best_component(comm);
+    if (NULL != component) {
+        ret = component->osc_connect_all_dpus(comm);
+        if (ret != OMPI_SUCCESS) {
+            return OMPI_ERROR;
+        }
+    }
+    return OMPI_SUCCESS;
+}

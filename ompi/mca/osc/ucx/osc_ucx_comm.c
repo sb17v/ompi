@@ -593,7 +593,8 @@ int accumulate_req(const void *origin_addr, int origin_count,
     opal_common_ucx_wpmem_t *mem = module->mem;
     void *free_ptr = NULL;
     bool lock_acquired = false;
-
+    /* Access osc component inside accumulate */
+    // mca_osc_ucx_component.dpu_worker->eps[] && mca_osc_ucx_component.dpu_worker->ep_count
     ret = check_sync_state(module, target, false);
     if (ret != OMPI_SUCCESS) {
         return ret;

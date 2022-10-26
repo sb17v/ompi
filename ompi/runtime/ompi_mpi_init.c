@@ -454,7 +454,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
     }
 
     OMPI_TIMING_NEXT("modex");
-
+    /* comm world and comm self is set here */
     MCA_PML_CALL(add_comm(&ompi_mpi_comm_world.comm));
     MCA_PML_CALL(add_comm(&ompi_mpi_comm_self.comm));
 
@@ -572,7 +572,11 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
     if (OMPI_SUCCESS != (ret = ompi_dpm_dyn_init())) {
         return ret;
     }
-
+    
+    ret = ompi_osc_base_connect_all_dpus(&ompi_mpi_comm_world.comm);
+    if (ret != OMPI_SUCCESS) {
+        return ret;
+    }
     /* Fall through */
  error:
     if (ret != OMPI_SUCCESS) {

@@ -12,6 +12,9 @@
 
 #include <ucp/api/ucp.h>
 
+#include <dpu_cli.h>
+#include <dpu_mpi_1sided.h>
+
 #include "ompi/group/group.h"
 #include "ompi/communicator/communicator.h"
 #include "opal/mca/common/ucx/common_ucx.h"
@@ -40,6 +43,9 @@ typedef struct ompi_osc_ucx_component {
     unsigned int priority;
     /* directory where to place backing files */
     char *backing_directory;
+    /*DPU offload related structures*/
+    dpu_cli_t *dpu_cli;
+    dpu_mpi1sdd_host_worker_t *dpu_offl_worker;
 } ompi_osc_ucx_component_t;
 
 OMPI_DECLSPEC extern ompi_osc_ucx_component_t mca_osc_ucx_component;
@@ -81,6 +87,7 @@ typedef struct ompi_osc_local_dynamic_win_info {
     opal_common_ucx_wpmem_t *mem;
     char *my_mem_addr;
     int my_mem_addr_size;
+    int my_mem_reg_id;
     int refcnt;
 } ompi_osc_local_dynamic_win_info_t;
 
@@ -124,7 +131,7 @@ typedef struct ompi_osc_ucx_module {
     opal_common_ucx_ctx_t *ctx;
     opal_common_ucx_wpmem_t *mem;
     opal_common_ucx_wpmem_t *state_mem;
-
+    int mem_reg_id;
     bool noncontig_shared_win;
     size_t *sizes;
     /* in shared windows, shmem_addrs can be used for direct load store to
