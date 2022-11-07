@@ -277,6 +277,12 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     if (ret != OMPI_SUCCESS) {
         return ret;
     }
+    // Need to check target is the current PE
+    /* Flush the local host channel ep in case of fence*/
+    dpu_hc_ep_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
+    while (!(ret = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
+        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+    }
 
     return OMPI_SUCCESS;
 }

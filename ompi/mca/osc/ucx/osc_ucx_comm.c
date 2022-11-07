@@ -19,7 +19,7 @@
 
 #include "osc_ucx.h"
 #include "osc_ucx_request.h"
-
+#include <sys/time.h>
 
 #define CHECK_VALID_RKEY(_module, _target, _count)                               \
     if (!((_module)->win_info_array[_target]).rkey_init && ((_count) > 0)) {     \
@@ -579,7 +579,143 @@ int ompi_osc_ucx_get(void *origin_addr, int origin_count,
 }
 
 static
-int accumulate_req(const void *origin_addr, int origin_count,
+int accumulate_req_v2(const void *origin_addr, int origin_count,
+                   struct ompi_datatype_t *origin_dt,
+                   int target, ptrdiff_t target_disp, int target_count,
+                   struct ompi_datatype_t *target_dt,
+                   struct ompi_op_t *op, struct ompi_win_t *win,
+                   ompi_osc_ucx_request_t *ucx_req) {
+    ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
+    ptrdiff_t origin_lb, origin_extent, target_lb, target_extent, total_target_disp;
+    int i, comm_world_size, origin_rank, target_rank, win_id, is_inline_data,
+        ret = OMPI_SUCCESS, status = -1, *ranks_in_grp = NULL, *ranks_in_win_grp = NULL;
+    ompi_group_t *comm_world_group = NULL, *win_group = NULL;
+    int global_local_rank;  // Temporary var - need cleanup
+    void *origin_data;
+    char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
+    int size;
+    struct timeval accum_ret_time;
+
+    /* Check with Artem what it is doing - Possibly not required in our case */
+    ret = check_sync_state(module, target, false);
+    if (ret != OMPI_SUCCESS) {
+        return ret;
+    }
+
+    if (op == &ompi_mpi_op_no_op.op) {
+        return ret;
+    }
+
+    if (op == &ompi_mpi_op_replace.op) {
+        printf("Support for op replace not implemented. We will include it soon...\n");
+        return ret;
+    } else {
+        if (!ompi_datatype_is_contiguous_memory_layout(origin_dt, origin_count)) {
+            printf("Support is not available for non-contiguous data\n");
+            return ret;
+        }
+        if (!ompi_datatype_is_predefined(target_dt)) {
+            printf("Support is not available for user-defined datatype.\n");
+            return ret;
+        }
+
+        ompi_datatype_get_true_extent(origin_dt, &origin_lb, &origin_extent);
+        ompi_datatype_get_true_extent(target_dt, &target_lb, &target_extent);
+        
+        // Attempt to guarantee the ordering
+        ret = ompi_comm_group(&ompi_mpi_comm_world.comm, &comm_world_group);
+        if (ret != OMPI_SUCCESS) {
+            return OMPI_ERROR;
+        }
+
+        comm_world_size = ompi_group_size(comm_world_group);
+        ranks_in_grp = malloc(sizeof(int) * comm_world_size);
+        ranks_in_win_grp = malloc(sizeof(int) * ompi_comm_size(module->comm));
+
+        for(i = 0; i < comm_world_size; i++) {
+            ranks_in_grp[i] = i;
+        }
+
+        ret = ompi_comm_group(module->comm, &win_group);
+        if (ret != OMPI_SUCCESS) {
+            free(ranks_in_grp);
+            free(ranks_in_win_grp);
+            return OMPI_ERROR;
+        }
+
+        ret = ompi_group_translate_ranks(comm_world_group, comm_world_size, ranks_in_grp,
+                                            win_group, ranks_in_win_grp);
+        if (ret != OMPI_SUCCESS) {
+            free(ranks_in_grp);
+            free(ranks_in_win_grp);
+            return OMPI_ERROR;
+        }
+
+        origin_rank = ranks_in_win_grp[ompi_comm_rank(module->comm)];
+        target_rank = ranks_in_win_grp[target];
+
+        win_id  = module->mem_reg_id;
+        total_target_disp = (target_disp * OSC_UCX_GET_DISP(module, target)) + target_lb;
+        if (&ompi_mpi_double.dt != origin_dt && &ompi_mpi_double.dt != target_dt) {
+            printf("Datatype is not MPI_DOUBLE. Support not available...\n");
+        }
+        assert(&ompi_mpi_double.dt == origin_dt);
+        assert(&ompi_mpi_double.dt == target_dt);
+
+        if (&ompi_mpi_op_sum.op != op) {
+            printf("Op is not MPI_SUM. Support not available...\n");
+        }
+        assert(&ompi_mpi_op_sum.op == op);
+
+        uint16_t origin_dt = 1;
+        uint16_t target_dt = 1;
+        origin_data = origin_addr + origin_lb;
+        // Add size of header
+        if((origin_extent * origin_count) <= (DPU_MPI1SDD_BUF_SIZE - sizeof(dpu_mpi1sdd_accumulate_req))) {
+            is_inline_data = 1;
+        } else {
+            is_inline_data = 0;
+        }
+
+        // First check for inline data
+        {
+            // Add op support in ACCUMULATE_REQ
+            DPU_MPI1SDD_ACCUMULATE_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE,
+                        origin_rank, target_rank, win_id, total_target_disp, origin_count,
+                        target_count, origin_dt, target_dt, is_inline_data, origin_data);
+            assert(0 == status);
+            // Make it Non-blocking
+            // status = dpu_mpi1sdd_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
+            //                             (void*)in_buf, DPU_OFFL_GET_SIZE(in_buf));
+            // assert(0 == status);
+            // if (!is_inline_data)
+            // {
+            //     printf("Handling non-inline data\n");
+            //     status = dpu_mpi1sdd_tag_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
+            //                                     1, (void*)origin_data, (origin_count * origin_extent));
+            // }
+            // size = DPU_MPI1SDD_BUF_SIZE;
+            // dpu_mpi1sdd_recv((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, (void*)out_buf, &size);
+            // assert(DPU_OFFL_GET_SIZE(out_buf) == size);
+
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+        }
+
+    }
+    
+    if (NULL != ucx_req) {
+        // nothing to wait for, mark request as completed
+        ompi_request_complete(&ucx_req->super, true);
+    }
+    gettimeofday(&accum_ret_time, NULL);
+    printf("Accumulate req completed on: %ld secs\n", (accum_ret_time.tv_sec * 1000000) + accum_ret_time.tv_usec);
+    return ret;
+}
+
+static
+int accumulate_req_v1(const void *origin_addr, int origin_count,
                    struct ompi_datatype_t *origin_dt,
                    int target, ptrdiff_t target_disp, int target_count,
                    struct ompi_datatype_t *target_dt,
@@ -728,7 +864,7 @@ int ompi_osc_ucx_accumulate(const void *origin_addr, int origin_count,
                             int target, ptrdiff_t target_disp, int target_count,
                             struct ompi_datatype_t *target_dt,
                             struct ompi_op_t *op, struct ompi_win_t *win) {
-    return accumulate_req(origin_addr, origin_count, origin_dt, target,
+    return accumulate_req_v2(origin_addr, origin_count, origin_dt, target,
                           target_disp, target_count, target_dt, op, win, NULL);
 }
 
@@ -1169,7 +1305,7 @@ int ompi_osc_ucx_raccumulate(const void *origin_addr, int origin_count,
     OMPI_OSC_UCX_REQUEST_ALLOC(win, ucx_req);
     assert(NULL != ucx_req);
 
-    ret = accumulate_req(origin_addr, origin_count, origin_dt, target, target_disp,
+    ret = accumulate_req_v2(origin_addr, origin_count, origin_dt, target, target_disp,
                          target_count, target_dt, op, win, ucx_req);
     if (ret != OMPI_SUCCESS) {
         OMPI_OSC_UCX_REQUEST_RETURN(ucx_req);

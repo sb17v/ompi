@@ -60,6 +60,8 @@ static inline void ompi_osc_ucx_handle_incoming_post(ompi_osc_ucx_module_t *modu
 
 int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
+    dpu_hc_req_t dpu_hc_req;
+
     int ret = OMPI_SUCCESS;
 
     if (module->epoch_type.access != NONE_EPOCH &&
@@ -78,6 +80,11 @@ int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
         if (ret != OMPI_SUCCESS) {
             return ret;
         }
+    }
+    /* Flush the local host channel worker in case of fence*/
+    dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
+    while (!(ret = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
+        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
     }
 
     return module->comm->c_coll->coll_barrier(module->comm,

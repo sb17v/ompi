@@ -13,7 +13,7 @@
 #include <ucp/api/ucp.h>
 
 #include <dpu_cli.h>
-#include <dpu_mpi_1sided.h>
+#include <dpu_mpi1sdd_host.h>
 
 #include "ompi/group/group.h"
 #include "ompi/communicator/communicator.h"
@@ -131,7 +131,6 @@ typedef struct ompi_osc_ucx_module {
     opal_common_ucx_ctx_t *ctx;
     opal_common_ucx_wpmem_t *mem;
     opal_common_ucx_wpmem_t *state_mem;
-    int mem_reg_id;
     bool noncontig_shared_win;
     size_t *sizes;
     /* in shared windows, shmem_addrs can be used for direct load store to
@@ -140,6 +139,8 @@ typedef struct ompi_osc_ucx_module {
     void *segment_base;
     /** opal shared memory structure for the shared memory segment */
     opal_shmem_ds_t seg_ds;
+    int mem_reg_id;
+    dpu_hc_mem_t *mem_reg_info;
 } ompi_osc_ucx_module_t;
 
 typedef enum locktype {
