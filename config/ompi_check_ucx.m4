@@ -31,6 +31,25 @@ AC_DEFUN([OMPI_CHECK_UCX],[
     AC_ARG_WITH([ucx-libdir],
                 [AS_HELP_STRING([--with-ucx-libdir=DIR],
                                 [Search for Unified Communication X libraries in DIR])])
+    AC_ARG_WITH([urom],
+            AS_HELP_STRING([--with-urom=<path>], [UROM install path]),
+            [
+                  AC_CHECK_FILE(["$with_urom/include/dpu_mpi_1sided.h"],
+                                [],
+                                [AC_MSG_ERROR([Invalid UROM path: "$with_urom"])])
+                  [ UROM_LDFLAGS="-L$with_urom/lib -ldpu_server -Wl,-rpath -Wl,$with_dpu/lib"
+                        UROM_CFLAGS="-I$with_urom/include"
+                        HAVE_UROM=yes ]
+            ],
+            [ UROM_LDFLAGS="" UROM_CFLAGS="" HAVE_UROM=no]
+      )
+      UROM_PATH="$with_urom"
+      AC_SUBST([UROM_LDFLAGS])
+      AC_SUBST([UROM_CFLAGS])
+      AM_CONDITIONAL([HAVE_UROM], [test x$HAVE_UROM = xyes])
+      AS_IF([test x$HAVE_UROM = xyes],
+      [AC_DEFINE(HAVE_UROM, [1], [UROM support])
+    ])
 
     OAC_CHECK_PACKAGE([ucx],
                       [$1],
