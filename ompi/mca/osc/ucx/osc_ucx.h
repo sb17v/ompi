@@ -232,6 +232,7 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win);
 int ompi_osc_ucx_flush_all(struct ompi_win_t *win);
 int ompi_osc_ucx_flush_local(int target, struct ompi_win_t *win);
 int ompi_osc_ucx_flush_local_all(struct ompi_win_t *win);
+int ompi_osc_ucx_get_comm_world_rank_map(struct ompi_win_t *win, int **rank_map);
 
 int ompi_osc_find_attached_region_position(ompi_osc_dynamic_win_info_t *dynamic_wins,
                                            int min_index, int max_index,

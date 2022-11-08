@@ -266,7 +266,8 @@ int ompi_osc_ucx_sync(struct ompi_win_t *win) {
 
 int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
-    int ret = OMPI_SUCCESS;
+    dpu_hc_req_t dpu_hc_req;
+    int pmix_rank, ret = OMPI_SUCCESS, *rank_map = NULL;
 
     if (module->epoch_type.access != PASSIVE_EPOCH &&
         module->epoch_type.access != PASSIVE_ALL_EPOCH) {
@@ -278,10 +279,17 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
         return ret;
     }
     // Need to check target is the current PE
-    /* Flush the local host channel ep in case of fence*/
-    dpu_hc_ep_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-    while (!(ret = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
-        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+    /* Flush the local host channel ep in case of flush*/
+    ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
+    if (ret != OMPI_SUCCESS) {
+        return ret;
+    }
+    pmix_rank = atoi(getenv("PMIX_RANK"));
+    if (pmix_rank == rank_map[target]) {
+        dpu_hc_ep_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
+        while (!(ret = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
+            dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+        }
     }
 
     return OMPI_SUCCESS;
