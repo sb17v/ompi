@@ -631,7 +631,8 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
     size_t size;
     dpu_mpi1sdd_mem_t *mem_reg_info;
     struct timeval accum_ret_time;
-
+    dpu_mpi1sdd_req_t mpi1sdd_recv_req, mpi1sdd_req;
+    
     /* Check with Artem what it is doing - Possibly not required in our case */
     ret = check_sync_state(module, target, false);
     if (ret != OMPI_SUCCESS) {
@@ -654,6 +655,11 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
             printf("Support is not available for user-defined datatype.\n");
             return ret;
         }
+        
+        /* Post non-blocking recv in advance */
+        size = DPU_MPI1SDD_BUF_SIZE;
+        status = dpu_mpi1sdd_recv_nb((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, (void*)out_buf, size, &mpi1sdd_recv_req);
+        assert(0 <= status);
 
         ompi_datatype_get_true_extent(origin_dt, &origin_lb, &origin_extent);
         ompi_datatype_get_true_extent(target_dt, &target_lb, &target_extent);
@@ -691,7 +697,7 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
             mem_reg_info = calloc(1, sizeof(*mem_reg_info));
             // TODO: Cache support needs to be enabled
             // expose only for host use
-            printf("Origin addr: %p size: %d\n", origin_data, (origin_extent * origin_count));
+            // printf("Origin addr: %p size: %d\n", origin_data, (origin_extent * origin_count));
             status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, mem_reg_info, origin_data, (origin_count * origin_extent));
             assert(0 == status);
         }
@@ -704,7 +710,8 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
                         target_count, origin_dt, target_dt, is_inline_data, origin_data, 
                         mem_reg_info->rkey.addr_ptr, mem_reg_info->rkey.addr_len);
             assert(0 == status);
-            // Make it Non-blocking
+            // Send is kept as blocking as there is no benefit by making it non-blocking
+            // Ensure atleast the payload is send completely
             status = dpu_mpi1sdd_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
                                         (void*)in_buf, DPU_OFFL_GET_SIZE(in_buf));
             assert(0 == status);
@@ -714,25 +721,42 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
             //     status = dpu_mpi1sdd_tag_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
             //                                     1, (void*)origin_data, (origin_count * origin_extent));
             // }
-            size = DPU_MPI1SDD_BUF_SIZE;
-            status = dpu_mpi1sdd_recv((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, (void*)out_buf, &size);
-            assert(0 == status);
-            assert(DPU_OFFL_GET_SIZE(out_buf) == size);
-
             // status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             // assert(0 == status);
-            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+            // assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
         }
 
     }
+    /* flush and progress the mpi1sdd worker to ensure get operation from remote dpu */
+    if (0 == is_inline_data) {
+        dpu_mpi1sdd_worker_flush_nb((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, &mpi1sdd_req);
+        while (!(status = dpu_mpi1sdd_req_test((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, &mpi1sdd_req))) {
+            dpu_mpi1sdd_progress((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker);
+        }
+        
+        /* Deregister the buffer in case of non-inline data */
+        // This may not happen here in case of cache functionality
+        status = dpu_mpi1sdd_buffer_dereg(mem_reg_info);
+        assert(0 == status);
+    }
     
+    /* Check mpi1sdd recv completion */
+    while (!(status = dpu_mpi1sdd_req_test((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, &mpi1sdd_recv_req)))
+    {
+        dpu_mpi1sdd_progress((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker);
+    }
+    if (1 == status)
+    {
+        size = dpu_mpi1sdd_req_size(&mpi1sdd_recv_req);
+    }
+    assert(DPU_OFFL_GET_SIZE(out_buf) == size);
+    assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+
     if (NULL != ucx_req) {
         // nothing to wait for, mark request as completed
         ompi_request_complete(&ucx_req->super, true);
     }
-    // This will not happen here in case of cache functionality
-    status = dpu_mpi1sdd_buffer_dereg(mem_reg_info);
-    assert(0 == status);
+
     gettimeofday(&accum_ret_time, NULL);
     printf("Accumulate req completed on: %ld secs\n", (accum_ret_time.tv_sec * 1000000) + accum_ret_time.tv_usec);
     return ret;

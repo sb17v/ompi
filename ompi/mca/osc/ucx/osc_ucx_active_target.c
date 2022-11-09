@@ -61,11 +61,12 @@ static inline void ompi_osc_ucx_handle_incoming_post(ompi_osc_ucx_module_t *modu
 int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
     dpu_hc_req_t dpu_hc_req;
-
-    int ret = OMPI_SUCCESS;
+    int local_rank, ret = OMPI_SUCCESS, status = -1, *rank_map = NULL;
+    char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
 
     if (module->epoch_type.access != NONE_EPOCH &&
         module->epoch_type.access != FENCE_EPOCH) {
+        printf("coming here in fence to give RMA sync error\n");
         return OMPI_ERR_RMA_SYNC;
     }
 
@@ -80,11 +81,22 @@ int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
         if (ret != OMPI_SUCCESS) {
             return ret;
         }
-        /* Flush the local host channel worker in case of fence - target is ignored in case of worker flush*/
+        /* Flush the local host channel worker in case of fence - fence should be called on both origin and target side*/
         dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-        while (!(ret = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
+        while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
             dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
         }
+        ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
+        if (ret != OMPI_SUCCESS) {
+            return ret;
+        }
+        /* Flush the local dpu worker also to ensure there is no outstanding ops */
+        local_rank = rank_map[ompi_comm_rank(module->comm)];
+        DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+        assert(0 == status);
+        status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, local_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+        assert(0 == status);
+        assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
     }
 
     return module->comm->c_coll->coll_barrier(module->comm,
