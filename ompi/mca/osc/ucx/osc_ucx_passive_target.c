@@ -176,7 +176,7 @@ int ompi_osc_ucx_unlock(int target, struct ompi_win_t *win) {
     assert(0 == status);
     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-    /* Only flush the target ep - ideally it will not come inside this block - check */
+    /* Only flush the target ep */
     if (local_rank == rank_map[target]) {
         printf("-------Inside Win flush in unlock-------\n");
         dpu_hc_ep_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
@@ -349,7 +349,9 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
 
 int ompi_osc_ucx_flush_all(struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t *)win->w_osc_module;
-    int ret = OMPI_SUCCESS;
+    dpu_hc_req_t dpu_hc_req;
+    int local_rank, status = -1, ret = OMPI_SUCCESS, *rank_map = NULL;
+    char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
 
     if (module->epoch_type.access != PASSIVE_EPOCH &&
         module->epoch_type.access != PASSIVE_ALL_EPOCH) {
@@ -361,6 +363,22 @@ int ompi_osc_ucx_flush_all(struct ompi_win_t *win) {
         return ret;
     }
 
+    /* Flush the local host channel worker and local dpu worker*/
+    dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
+    while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
+        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+    }
+    ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
+    if (ret != OMPI_SUCCESS) {
+        return ret;
+    }
+    /* Flush the local dpu worker also to ensure there is no outstanding ops */
+    local_rank = rank_map[ompi_comm_rank(module->comm)];
+    DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+    assert(0 == status);
+    status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, local_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    assert(0 == status);
+    assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
     return OMPI_SUCCESS;
 }
 
