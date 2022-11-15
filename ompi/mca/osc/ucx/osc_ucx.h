@@ -140,7 +140,11 @@ typedef struct ompi_osc_ucx_module {
     /** opal shared memory structure for the shared memory segment */
     opal_shmem_ds_t seg_ds;
     int mem_reg_id;
-    dpu_hc_mem_t *mem_reg_info;
+    dpu_hc_mem_t *hc_mem_reg_info;
+    dpu_mpi1sdd_mem_t *mpi1sdd_mem_reg_cache;
+    size_t mpi1sdd_mem_reg_cache_cnt;
+    size_t *mpi1sdd_ops_tracker;
+    int *comm_world_rank_map;
 } ompi_osc_ucx_module_t;
 
 typedef enum locktype {

@@ -220,6 +220,10 @@ static int progress_callback(void) {
     if (mca_osc_ucx_component.wpool != NULL) {
         opal_common_ucx_wpool_progress(mca_osc_ucx_component.wpool);
     }
+    // mpi1sdd progress
+    dpu_mpi1sdd_progress((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker);
+    // hc progress
+    dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
     return 0;
 }
 
@@ -279,8 +283,6 @@ static int component_init(bool enable_progress_threads, bool enable_mpi_threads)
     }
 
     my_rank = atoi(getenv("PMIX_RANK"));
-    printf("Getting local rank: %d\n", my_rank);
-    fflush(stdout);
 
     mca_osc_ucx_component.dpu_cli = dpu_cli_connect(my_rank);
     
@@ -956,20 +958,20 @@ select_unlock:
         memcpy(&(module->state_addrs[i]), recv_buf + i * 2 * sizeof(uint64_t) + sizeof(uint64_t), sizeof(uint64_t));
     }
     /* Send this address details to DPU*/
-    // mem_reg_info.size = module->size;
-    // mem_reg_info.rkey.addr_ptr = my_mem_addr;
-    // mem_reg_info.rkey.addr_len = my_mem_addr_size;
-    // mem_reg_info.base = module->addrs[ompi_comm_rank(module->comm)];
+    // hc_mem_reg_info.size = module->size;
+    // hc_mem_reg_info.rkey.addr_ptr = my_mem_addr;
+    // hc_mem_reg_info.rkey.addr_len = my_mem_addr_size;
+    // hc_mem_reg_info.base = module->addrs[ompi_comm_rank(module->comm)];
     
-    module->mem_reg_info = calloc(1, sizeof(*module->mem_reg_info));
+    module->hc_mem_reg_info = calloc(1, sizeof(*module->hc_mem_reg_info));
     if (0 != module->size) {
-        status = dpu_hc_buffer_reg(&mca_osc_ucx_component.dpu_cli->hc, module->mem_reg_info, (void *)module->addrs[ompi_comm_rank(module->comm)], module->size);
+        status = dpu_hc_buffer_reg(&mca_osc_ucx_component.dpu_cli->hc, module->hc_mem_reg_info, (void *)module->addrs[ompi_comm_rank(module->comm)], module->size);
         if(0 != status) {
             printf("dpu_hc_buffer_reg failed\n");
             goto error;
         }
         {
-            DPU_MRREG_REQ(status, in_buf, DPU_HC_BUF_SIZE, (module->mem_reg_info), 0);
+            DPU_MRREG_REQ(status, in_buf, DPU_HC_BUF_SIZE, (module->hc_mem_reg_info), 0);
             assert(0 == status);
             status = dpu_cli_cmd_exec(mca_osc_ucx_component.dpu_cli, in_buf, out_buf, DPU_HC_BUF_SIZE);
             assert(0 == status);
@@ -999,7 +1001,9 @@ select_unlock:
     OBJ_CONSTRUCT(&module->pending_posts, opal_list_t);
     module->start_grp_ranks = NULL;
     module->lock_all_is_nocheck = false;
-
+    module->mpi1sdd_mem_reg_cache = NULL;
+    module->mpi1sdd_mem_reg_cache_cnt = 0;
+    module->mpi1sdd_ops_tracker = calloc(comm_size, sizeof(*module->mpi1sdd_ops_tracker));
     if (!module->no_locks) {
         OBJ_CONSTRUCT(&module->outstanding_locks, opal_hash_table_t);
         ret = opal_hash_table_init(&module->outstanding_locks, comm_size);
@@ -1020,6 +1024,11 @@ select_unlock:
                                              module->comm->c_coll->coll_barrier_module);
     if (ret != OMPI_SUCCESS) {
         goto error;
+    }
+
+    ret = ompi_osc_ucx_get_comm_world_rank_map(win, &module->comm_world_rank_map);
+    if(OMPI_SUCCESS != ret) {
+        return ret;
     }
 
     return ret;
@@ -1206,12 +1215,12 @@ int ompi_osc_ucx_win_attach(struct ompi_win_t *win, void *base, size_t len) {
     /* Send to DPU */
     // Maybe this is not required -- check
     // {
-    //     dpu_hc_mem_t mem_reg_info;
-    //     mem_reg_info.base = base;
-    //     mem_reg_info.size = len;
-    //     mem_reg_info.rkey.addr_ptr = module->local_dynamic_win_info[insert_index].my_mem_addr;
-    //     mem_reg_info.rkey.addr_len = module->local_dynamic_win_info[insert_index].my_mem_addr_size;
-    //     DPU_MRREG_REQ(status, in_buf, DPU_HC_BUF_SIZE, (&mem_reg_info), 0);
+    //     dpu_hc_mem_t hc_mem_reg_info;
+    //     hc_mem_reg_info.base = base;
+    //     hc_mem_reg_info.size = len;
+    //     hc_mem_reg_info.rkey.addr_ptr = module->local_dynamic_win_info[insert_index].my_mem_addr;
+    //     hc_mem_reg_info.rkey.addr_len = module->local_dynamic_win_info[insert_index].my_mem_addr_size;
+    //     DPU_MRREG_REQ(status, in_buf, DPU_HC_BUF_SIZE, (&hc_mem_reg_info), 0);
     //     assert(0 == status);
     //     status = dpu_cli_cmd_exec(mca_osc_ucx_component.dpu_cli, in_buf, out_buf, DPU_HC_BUF_SIZE);
     //     assert(0 == status);
@@ -1286,8 +1295,7 @@ int ompi_osc_ucx_win_detach(struct ompi_win_t *win, const void *base) {
 
 int ompi_osc_ucx_free(struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
-    dpu_hc_req_t dpu_hc_req;
-    int ret, local_rank, status = -1, *rank_map = NULL;
+    int ret, local_rank, target_rank, status = -1;
     char in_buf[DPU_HC_BUF_SIZE];
     char out_buf[DPU_HC_BUF_SIZE];
     uint64_t i;
@@ -1300,22 +1308,25 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
     OBJ_DESTRUCT(&module->pending_posts);
 
     opal_common_ucx_ctx_flush(module->ctx, OPAL_COMMON_UCX_SCOPE_WORKER, 0);
-    /* Flush the local host channel worker  and local dpu worker*/
-    dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-    while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
-        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+
+    local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
+    for (i = 0; i < ompi_comm_size(module->comm); i++) {
+        if (0 < module->mpi1sdd_ops_tracker[i]) {
+            target_rank = module->comm_world_rank_map[i];
+
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            assert(0 == status);
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            assert(0 == status);
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+        }
     }
-    ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
-    if (ret != OMPI_SUCCESS) {
-        return ret;
-    }
-    /* Flush the local dpu worker also to ensure there is no outstanding ops */
-    local_rank = rank_map[ompi_comm_rank(module->comm)];
-    DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
-    assert(0 == status);
-    status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, local_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-    assert(0 == status);
-    assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
     ret = module->comm->c_coll->coll_barrier(module->comm,
                                              module->comm->c_coll->coll_barrier_module);
@@ -1370,12 +1381,32 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
                 assert(0 == status);
                 assert(0 == DPU_MPI1SDD_GET_RESP_STATUS(out_buf));
             }
-            status = dpu_hc_buffer_dereg(module->mem_reg_info);
+            status = dpu_hc_buffer_dereg(module->hc_mem_reg_info);
             if (0 != status) {
                 return OMPI_ERROR;
             }
+            free(module->hc_mem_reg_info);
         }
     }
+
+    /* TODO: Need to re-check this tomorrow morning. deregister the cache entries */
+    for (i = 0; i < ompi_comm_size(module->comm); i++) {
+        if (0 < module->mpi1sdd_ops_tracker[i]) {
+            target_rank = module->comm_world_rank_map[i];
+
+            DPU_MPI1SDD_MPIC_CLEAN_RKEY_CACHE_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank)
+            assert(0 == status);
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_HC_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_GET_RESP_STATUS(out_buf));
+        }
+    }
+
+    for (i = 0; i < module->mpi1sdd_mem_reg_cache_cnt; i++) {
+        status = dpu_mpi1sdd_buffer_dereg(&module->mpi1sdd_mem_reg_cache[i]);
+        assert(0 == status);
+    }
+    free(module->mpi1sdd_mem_reg_cache);
 
     opal_common_ucx_wpctx_release(module->ctx);
 

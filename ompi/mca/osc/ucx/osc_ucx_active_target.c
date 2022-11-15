@@ -60,8 +60,7 @@ static inline void ompi_osc_ucx_handle_incoming_post(ompi_osc_ucx_module_t *modu
 
 int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
-    dpu_hc_req_t dpu_hc_req;
-    int local_rank, ret = OMPI_SUCCESS, status = -1, *rank_map = NULL;
+    int i, local_rank, target_rank, ret = OMPI_SUCCESS, status = -1;
     char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
 
     if (module->epoch_type.access != NONE_EPOCH &&
@@ -81,22 +80,27 @@ int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
         if (ret != OMPI_SUCCESS) {
             return ret;
         }
-        /* Flush the local host channel worker in case of fence - fence should be called on both origin and target side*/
-        dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-        while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
-            dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+        /* TODO: We need no flush every target but it's pretty heavy*/
+        /* THINK: Alternate impl may use two barrier*/
+        /* Flush the all connected dpu for hc channel and mpi1sdd channel */
+        local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
+        for (i = 0; i < ompi_comm_size(module->comm); i++) {
+            if (0 < module->mpi1sdd_ops_tracker[i]) {
+                target_rank = module->comm_world_rank_map[i];
+
+                DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+                assert(0 == status);
+                status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+                assert(0 == status);
+                assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+
+                DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+                assert(0 == status);
+                status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+                assert(0 == status);
+                assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+            }
         }
-        ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
-        if (ret != OMPI_SUCCESS) {
-            return ret;
-        }
-        /* Flush the local dpu worker also to ensure there is no outstanding ops */
-        local_rank = rank_map[ompi_comm_rank(module->comm)];
-        DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
-        assert(0 == status);
-        status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, local_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-        assert(0 == status);
-        assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
     }
 
     return module->comm->c_coll->coll_barrier(module->comm,
@@ -182,9 +186,8 @@ int ompi_osc_ucx_start(struct ompi_group_t *group, int mpi_assert, struct ompi_w
 
 int ompi_osc_ucx_complete(struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
-    dpu_hc_t dpu_hc_req;
-    int i, size, local_rank;
-    int ret = OMPI_SUCCESS, status = -1, *rank_map = NULL;
+    int i, size, local_rank, target_rank;
+    int ret = OMPI_SUCCESS, status = -1;
     char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
 
     if (module->epoch_type.access != START_COMPLETE_EPOCH) {
@@ -197,21 +200,25 @@ int ompi_osc_ucx_complete(struct ompi_win_t *win) {
     if (ret != OMPI_SUCCESS) {
         return ret;
     }
-    dpu_hc_worker_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-    while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
-        dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+
+    local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
+    for (i = 0; i < ompi_comm_size(module->comm); i++) {
+        if (0 < module->mpi1sdd_ops_tracker[i]) {
+            target_rank = module->comm_world_rank_map[i];
+
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            assert(0 == status);
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            assert(0 == status);
+            status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+            assert(0 == status);
+            assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+        }
     }
-    ret = ompi_osc_ucx_get_comm_world_rank_map(win, &rank_map);
-    if (ret != OMPI_SUCCESS) {
-        return ret;
-    }
-    /* Flush the local dpu worker also to ensure there is no outstanding ops */
-    local_rank = rank_map[ompi_comm_rank(module->comm)];
-    DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
-    assert(0 == status);
-    status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, local_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-    assert(0 == status);
-    assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
     size = ompi_group_size(module->start_group);
     for (i = 0; i < size; i++) {
@@ -228,21 +235,6 @@ int ompi_osc_ucx_complete(struct ompi_win_t *win) {
                                         module->start_grp_ranks[i]);
         if (ret != OMPI_SUCCESS) {
             return ret;
-        }
-
-        DPU_MPI1SDD_HC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
-        assert(0 == status);
-        status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, rank_map[module->start_grp_ranks[i]], in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-        assert(0 == status);
-        assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
-
-        /* Only flush the target ep */
-        if (local_rank == rank_map[module->start_grp_ranks[i]]) {
-            printf("-------Inside Win flush in unlock-------\n");
-            dpu_hc_ep_flush_nb(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req);
-            while (!(status = dpu_hc_req_test(&mca_osc_ucx_component.dpu_cli->hc, &dpu_hc_req))) {
-                dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
-            }
         }
     }
 
