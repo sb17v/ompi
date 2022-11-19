@@ -42,7 +42,8 @@ static const char FUNC_NAME[] = "MPI_Win_flush";
 int MPI_Win_flush(int rank, MPI_Win win)
 {
     int ret = MPI_SUCCESS;
-
+    double param_check_start = 0.0, param_check_end = 0.0, flush_end = 0.0;
+    // param_check_start = MPI_Wtime();
     /* argument checking */
     if (MPI_PARAM_CHECK) {
         OMPI_ERR_INIT_FINALIZE(FUNC_NAME);
@@ -52,8 +53,12 @@ int MPI_Win_flush(int rank, MPI_Win win)
         }
         OMPI_ERRHANDLER_CHECK(ret, win, ret, FUNC_NAME);
     }
-
+    // param_check_end = MPI_Wtime();
     /* create window and return */
     ret = win->w_osc_module->osc_flush(rank, win);
+    // flush_end = MPI_Wtime();
+    // printf("Win Flush time: param_check_time: %lf internal flush time: %lf\n",
+    //         (param_check_end - param_check_start) * 1.0e6,
+    //         (flush_end - param_check_end) * 1.0e6); fflush(stdout);
     OMPI_ERRHANDLER_RETURN(ret, win, ret, FUNC_NAME);
 }

@@ -1389,7 +1389,7 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
         }
     }
 
-    /* TODO: Need to re-check this tomorrow morning. deregister the cache entries */
+    /* TODO: Need to re-check. deregister the cache entries */
     for (i = 0; i < ompi_comm_size(module->comm); i++) {
         if (0 < module->mpi1sdd_ops_tracker[i]) {
             target_rank = module->comm_world_rank_map[i];

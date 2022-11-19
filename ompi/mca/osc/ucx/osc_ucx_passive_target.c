@@ -15,6 +15,7 @@
 #include "opal/mca/common/ucx/common_ucx.h"
 
 #include "osc_ucx.h"
+#include <sys/time.h>
 
 OBJ_CLASS_INSTANCE(ompi_osc_ucx_lock_t, opal_object_t, NULL, NULL);
 
@@ -305,6 +306,8 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     ompi_osc_ucx_module_t *module = (ompi_osc_ucx_module_t*) win->w_osc_module;
     int i, local_rank, target_rank, status = -1, ret = OMPI_SUCCESS;
     char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
+    double dpu_flush_start = 0.0, dpu_flush_end = 0.0, dpu_req_create_end = 0.0;
+    struct timeval flush_start_time;
 
     if (module->epoch_type.access != PASSIVE_EPOCH &&
         module->epoch_type.access != PASSIVE_ALL_EPOCH) {
@@ -315,22 +318,28 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     if (ret != OMPI_SUCCESS) {
         return ret;
     }
-
+    // gettimeofday(&flush_start_time, NULL);
+    // dpu_flush_start = MPI_Wtime();
     /* Instead of flushing the local ep for target, flush the dpu ep for target */
     local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
     target_rank = module->comm_world_rank_map[target];
     DPU_MPI1SDD_HC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
     assert(0 == status);
+    // dpu_req_create_end = MPI_Wtime();
     status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    // dpu_flush_end = MPI_Wtime();
     assert(0 == status);
     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
-
-    DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
-    assert(0 == status);
-    status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-    assert(0 == status);
-    assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
-
+    // Seems like mpic ep flush is not required as get should be completed inside callback - if required it should be called before hc flush logically
+    // DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
+    // assert(0 == status);
+    // status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    // assert(0 == status);
+    // assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+    // printf("Flush end timestamp: %lf \n", (flush_start_time.tv_sec * 1.0e6) + flush_start_time.tv_usec);
+    // printf("Flush time: req create time: %lf cmd_exec time: %lf\n",
+    //         (dpu_req_create_end - dpu_flush_start) * 1.0e6,
+    //         (dpu_flush_end - dpu_req_create_end) * 1.0e6); fflush(stdout);
     return OMPI_SUCCESS;
 }
 

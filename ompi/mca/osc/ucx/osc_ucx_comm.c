@@ -633,7 +633,7 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
     int mem_reg_info_found_flag;
     struct timeval accum_start_time, accum_ret_time;
     
-    gettimeofday(&accum_start_time, NULL);
+    // gettimeofday(&accum_start_time, NULL);
 
     ret = check_sync_state(module, target, false);
     if (ret != OMPI_SUCCESS) {
@@ -690,6 +690,9 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
                 module->mpi1sdd_mem_reg_cache_cnt += 1;
                 module->mpi1sdd_mem_reg_cache = calloc(1, sizeof(*module->mpi1sdd_mem_reg_cache));
                 mem_reg_info = &module->mpi1sdd_mem_reg_cache[0];
+                status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
+                                                    mem_reg_info, origin_data, (origin_count * origin_extent));
+                assert(0 == status);
             } else {
                 for(i = 0; i < module->mpi1sdd_mem_reg_cache_cnt; i++) {
                     /* Range check */
@@ -711,12 +714,13 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
                                                             (module->mpi1sdd_mem_reg_cache_cnt *
                                                             sizeof(*module->mpi1sdd_mem_reg_cache)));
                     mem_reg_info = &module->mpi1sdd_mem_reg_cache[module->mpi1sdd_mem_reg_cache_cnt - 1];
+                    status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
+                                                    mem_reg_info, origin_data, (origin_count * origin_extent));
+                    assert(0 == status);
                 }
             }
             
             // printf("Origin addr: %p size: %d\n", origin_data, (origin_extent * origin_count));
-            status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, mem_reg_info, origin_data, (origin_count * origin_extent));
-            assert(0 == status);
         }
         fflush(stdout);
         {
@@ -749,9 +753,9 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
         ompi_request_complete(&ucx_req->super, true);
     }
 
-    gettimeofday(&accum_ret_time, NULL);
-    printf("Accumulate end timestamp: %ld microsecs\n", (accum_ret_time.tv_sec * 1000000) + accum_ret_time.tv_usec);
-    printf("Accumulate time: %ld microsecs\n", ((accum_ret_time.tv_sec - accum_start_time.tv_sec) * 1000000) + (accum_ret_time.tv_usec- accum_start_time.tv_usec));
+    // gettimeofday(&accum_ret_time, NULL);
+    // printf("Accumulate end timestamp: %lf microsecs\n", (accum_ret_time.tv_sec * 1.0e6) + accum_ret_time.tv_usec);
+    // printf("Accumulate time: %ld microsecs\n", ((accum_ret_time.tv_sec - accum_start_time.tv_sec) * 1000000) + (accum_ret_time.tv_usec- accum_start_time.tv_usec));
     return ret;
 }
 
