@@ -87,14 +87,13 @@ int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
         for (i = 0; i < ompi_comm_size(module->comm); i++) {
             if (0 < module->mpi1sdd_ops_tracker[i]) {
                 target_rank = module->comm_world_rank_map[i];
-
-                DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+                DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
                 assert(0 == status);
                 status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
                 assert(0 == status);
                 assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-                DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+                DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
                 assert(0 == status);
                 status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
                 assert(0 == status);
@@ -205,14 +204,13 @@ int ompi_osc_ucx_complete(struct ompi_win_t *win) {
     for (i = 0; i < ompi_comm_size(module->comm); i++) {
         if (0 < module->mpi1sdd_ops_tracker[i]) {
             target_rank = module->comm_world_rank_map[i];
-
-            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
             assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);

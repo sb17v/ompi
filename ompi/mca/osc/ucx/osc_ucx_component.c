@@ -217,13 +217,32 @@ static int component_register(void) {
 }
 
 static int progress_callback(void) {
+    int i, status, global_comm_size, local_rank;
+    char in_buf[DPU_MPI1SDD_BUF_SIZE], out_buf[DPU_MPI1SDD_BUF_SIZE];
+
     if (mca_osc_ucx_component.wpool != NULL) {
         opal_common_ucx_wpool_progress(mca_osc_ucx_component.wpool);
     }
+    // global_comm_size = ompi_comm_size(&ompi_mpi_comm_world.comm);
+    // local_rank = ompi_comm_rank(&ompi_mpi_comm_world.comm);
     // mpi1sdd progress
     dpu_mpi1sdd_progress((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker);
+    // for (i = 0; i < global_comm_size; i++) {
+    //     DPU_MPI1SDD_MPIC_WORKER_PROGRESS_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+    //     assert(0 == status);
+    //     status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, i, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    //     assert(0 == status);
+    //     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+    // }
     // hc progress
-    dpu_hc_progress(&mca_osc_ucx_component.dpu_cli->hc);
+    dpu_hc_progress(mca_osc_ucx_component.dpu_cli->hc);
+    // for (i = 0; i < global_comm_size; i++) {
+    //     DPU_MPI1SDD_HC_WORKER_PROGRESS_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+    //     assert(0 == status);
+    //     status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, i, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    //     assert(0 == status);
+    //     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+    // }
     return 0;
 }
 
@@ -285,10 +304,9 @@ static int component_init(bool enable_progress_threads, bool enable_mpi_threads)
     my_rank = atoi(getenv("PMIX_RANK"));
 
     mca_osc_ucx_component.dpu_cli = dpu_cli_connect(my_rank);
-    
-    dpu_mpi1sdd_host_worker_t offl_worker;
-    mca_osc_ucx_component.dpu_offl_worker = calloc(1, sizeof(*mca_osc_ucx_component.dpu_offl_worker));
-    dpu_mpi1sdd_init(mca_osc_ucx_component.dpu_offl_worker);
+    assert(NULL != mca_osc_ucx_component.dpu_cli);
+    mca_osc_ucx_component.dpu_offl_worker = dpu_mpi1sdd_host_init(NULL);
+    assert(NULL != mca_osc_ucx_component.dpu_offl_worker);
     
     {
         DPU_MPI1SDD_INIT_REQ(status, in_buf, DPU_HC_BUF_SIZE);
@@ -518,7 +536,7 @@ static int _create_all_endpoints(void **addrs, int *addr_lens)
     int ret;
 
     mca_osc_ucx_component.dpu_offl_worker->ep_count = ompi_proc_world_size();
-    mca_osc_ucx_component.dpu_offl_worker->eps = (dpu_ucx_ep_t *)calloc(mca_osc_ucx_component.dpu_offl_worker->ep_count,
+    mca_osc_ucx_component.dpu_offl_worker->eps = (dpu_ucx_ep_t **)calloc(mca_osc_ucx_component.dpu_offl_worker->ep_count,
                                             sizeof(*(mca_osc_ucx_component.dpu_offl_worker->eps)));
     for (i = 0; i < mca_osc_ucx_component.dpu_offl_worker->ep_count; i++)
     {
@@ -551,7 +569,7 @@ static int component_connect_all_dpus(struct ompi_communicator_t *comm) {
     comm_size = ompi_comm_size(comm);
     /* Use host channel to send GET_DPU_ADDRESS command and take the response back with DPU address */
     {
-        DPU_MPI1SDD_GET_ADDRS_REQ(status, in_buf, DPU_HC_BUF_SIZE, (&mca_osc_ucx_component.dpu_offl_worker->worker));
+        DPU_MPI1SDD_GET_ADDRS_REQ(status, in_buf, DPU_HC_BUF_SIZE, (mca_osc_ucx_component.dpu_offl_worker->worker));
         assert(0 == status);
         status = dpu_cli_cmd_exec(mca_osc_ucx_component.dpu_cli, in_buf, out_buf, DPU_HC_BUF_SIZE);
         assert(0 == status);
@@ -559,8 +577,8 @@ static int component_connect_all_dpus(struct ompi_communicator_t *comm) {
     }
 
     /* ----- This point assumes the mpi worker has host and dpu address info ----- */
-    ret = exchange_len_info_v1(mca_osc_ucx_component.dpu_offl_worker->worker.local_addr,
-                            mca_osc_ucx_component.dpu_offl_worker->worker.local_addr_sz,
+    ret = exchange_len_info_v1(mca_osc_ucx_component.dpu_offl_worker->worker->local_addr,
+                            mca_osc_ucx_component.dpu_offl_worker->worker->local_addr_sz,
                             &temp_host_addr, &host_addr_lens, &temp_host_addr_disp, (void *)comm);
     if(OMPI_SUCCESS != ret)
     {
@@ -963,10 +981,9 @@ select_unlock:
     // hc_mem_reg_info.rkey.addr_len = my_mem_addr_size;
     // hc_mem_reg_info.base = module->addrs[ompi_comm_rank(module->comm)];
     
-    module->hc_mem_reg_info = calloc(1, sizeof(*module->hc_mem_reg_info));
     if (0 != module->size) {
-        status = dpu_hc_buffer_reg(&mca_osc_ucx_component.dpu_cli->hc, module->hc_mem_reg_info, (void *)module->addrs[ompi_comm_rank(module->comm)], module->size);
-        if(0 != status) {
+        module->hc_mem_reg_info = dpu_hc_buffer_reg(mca_osc_ucx_component.dpu_cli->hc, (void *)module->addrs[ompi_comm_rank(module->comm)], module->size);
+        if(NULL == module->hc_mem_reg_info) {
             printf("dpu_hc_buffer_reg failed\n");
             goto error;
         }
@@ -1313,14 +1330,13 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
     for (i = 0; i < ompi_comm_size(module->comm); i++) {
         if (0 < module->mpi1sdd_ops_tracker[i]) {
             target_rank = module->comm_world_rank_map[i];
-
-            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
             assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
@@ -1385,7 +1401,6 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
             if (0 != status) {
                 return OMPI_ERROR;
             }
-            free(module->hc_mem_reg_info);
         }
     }
 
@@ -1403,7 +1418,7 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
     }
 
     for (i = 0; i < module->mpi1sdd_mem_reg_cache_cnt; i++) {
-        status = dpu_mpi1sdd_buffer_dereg(&module->mpi1sdd_mem_reg_cache[i]);
+        status = dpu_mpi1sdd_buffer_dereg(module->mpi1sdd_mem_reg_cache[i]);
         assert(0 == status);
     }
     free(module->mpi1sdd_mem_reg_cache);

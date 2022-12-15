@@ -167,13 +167,13 @@ int ompi_osc_ucx_unlock(int target, struct ompi_win_t *win) {
     /* Instead of flushing the local ep for target, flush the dpu ep for target */
     local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
     target_rank = module->comm_world_rank_map[target];
-    DPU_MPI1SDD_HC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+    DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
     assert(0 == status);
     status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
     assert(0 == status);
     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-    DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
+    DPU_MPI1SDD_HC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
     assert(0 == status);
     status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
     assert(0 == status);
@@ -256,14 +256,13 @@ int ompi_osc_ucx_unlock_all(struct ompi_win_t *win) {
     for (i = 0; i < ompi_comm_size(module->comm); i++) {
         if (0 < module->mpi1sdd_ops_tracker[i]) {
             target_rank = module->comm_world_rank_map[i];
-
-            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
             assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
@@ -323,6 +322,13 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     /* Instead of flushing the local ep for target, flush the dpu ep for target */
     local_rank = module->comm_world_rank_map[ompi_comm_rank(module->comm)];
     target_rank = module->comm_world_rank_map[target];
+    // Seems like mpic ep flush is not required as get should be completed inside callback - if required it should be called before hc flush logically
+    // DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
+    // assert(0 == status);
+    // status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
+    // assert(0 == status);
+    // assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
+
     DPU_MPI1SDD_HC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
     assert(0 == status);
     // dpu_req_create_end = MPI_Wtime();
@@ -330,12 +336,6 @@ int ompi_osc_ucx_flush(int target, struct ompi_win_t *win) {
     // dpu_flush_end = MPI_Wtime();
     assert(0 == status);
     assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
-    // Seems like mpic ep flush is not required as get should be completed inside callback - if required it should be called before hc flush logically
-    // DPU_MPI1SDD_MPIC_EP_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank, local_rank);
-    // assert(0 == status);
-    // status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-    // assert(0 == status);
-    // assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
     // printf("Flush end timestamp: %lf \n", (flush_start_time.tv_sec * 1.0e6) + flush_start_time.tv_usec);
     // printf("Flush time: req create time: %lf cmd_exec time: %lf\n",
     //         (dpu_req_create_end - dpu_flush_start) * 1.0e6,
@@ -362,14 +362,13 @@ int ompi_osc_ucx_flush_all(struct ompi_win_t *win) {
     for (i = 0; i < ompi_comm_size(module->comm); i++) {
         if (0 < module->mpi1sdd_ops_tracker[i]) {
             target_rank = module->comm_world_rank_map[i];
-
-            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);
             assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
 
-            DPU_MPI1SDD_MPIC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
+            DPU_MPI1SDD_HC_WORKER_FLUSH_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE, local_rank);
             assert(0 == status);
             status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
             assert(0 == status);

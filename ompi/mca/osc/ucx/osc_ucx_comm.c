@@ -665,19 +665,18 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
 
         win_id  = module->mem_reg_id;
         total_target_disp = (target_disp * OSC_UCX_GET_DISP(module, target)) + target_lb;
-        if (&ompi_mpi_double.dt != origin_dt && &ompi_mpi_double.dt != target_dt) {
-            printf("Datatype is not MPI_DOUBLE. Support not available...\n");
+        if (&ompi_mpi_double.dt != origin_dt && &ompi_mpi_int.dt != origin_dt) {
+            printf("Datatype is not MPI_DOUBLE or MPI_INT. Support not available...\n");
         }
-        assert(&ompi_mpi_double.dt == origin_dt);
-        assert(&ompi_mpi_double.dt == target_dt);
+        assert(target_dt == origin_dt);
 
         if (&ompi_mpi_op_sum.op != op) {
             printf("Op is not MPI_SUM. Support not available...\n");
         }
         assert(&ompi_mpi_op_sum.op == op);
 
-        uint16_t origin_dt = 1;
-        uint16_t target_dt = 1;
+        dpu_mpi1sdd_dt origin_dt = (&ompi_mpi_double.dt == origin_dt) ? DPU_MPI1SDD_DOUBLE : DPU_MPI1SDD_INT;
+        dpu_mpi1sdd_dt target_dt = (&ompi_mpi_double.dt == origin_dt) ? DPU_MPI1SDD_DOUBLE : DPU_MPI1SDD_INT;
         origin_data = ((void *)origin_addr) + origin_lb;
 
         if((origin_extent * origin_count) <= (DPU_MPI1SDD_BUF_SIZE - sizeof(dpu_mpi1sdd_accumulate_req))) {
@@ -689,18 +688,18 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
                 /* if mpi1sdd_mem_reg_cache_cnt is 0 allocate a single buffer & increment the count*/
                 module->mpi1sdd_mem_reg_cache_cnt += 1;
                 module->mpi1sdd_mem_reg_cache = calloc(1, sizeof(*module->mpi1sdd_mem_reg_cache));
-                mem_reg_info = &module->mpi1sdd_mem_reg_cache[0];
-                status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
-                                                    mem_reg_info, origin_data, (origin_count * origin_extent));
-                assert(0 == status);
+                module->mpi1sdd_mem_reg_cache[0] = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
+                                                    origin_data, (origin_count * origin_extent));
+                assert(NULL != module->mpi1sdd_mem_reg_cache[0]);
+                mem_reg_info = module->mpi1sdd_mem_reg_cache[0];
             } else {
                 for(i = 0; i < module->mpi1sdd_mem_reg_cache_cnt; i++) {
                     /* Range check */
-                    if (origin_data >= module->mpi1sdd_mem_reg_cache[i].base &&
+                    if (origin_data >= module->mpi1sdd_mem_reg_cache[i]->base &&
                         (origin_data + (origin_count * origin_extent)) <= 
-                        (module->mpi1sdd_mem_reg_cache[i].base + module->mpi1sdd_mem_reg_cache[i].size)) {
+                        (module->mpi1sdd_mem_reg_cache[i]->base + module->mpi1sdd_mem_reg_cache[i]->size)) {
                             /* get from cache */
-                            mem_reg_info = &module->mpi1sdd_mem_reg_cache[i];
+                            mem_reg_info = module->mpi1sdd_mem_reg_cache[i];
                             mem_reg_info_found_flag = 1;
                             break;
                         } else {
@@ -713,37 +712,24 @@ int accumulate_req_v2(const void *origin_addr, int origin_count,
                     module->mpi1sdd_mem_reg_cache = realloc(module->mpi1sdd_mem_reg_cache,
                                                             (module->mpi1sdd_mem_reg_cache_cnt *
                                                             sizeof(*module->mpi1sdd_mem_reg_cache)));
-                    mem_reg_info = &module->mpi1sdd_mem_reg_cache[module->mpi1sdd_mem_reg_cache_cnt - 1];
-                    status = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
-                                                    mem_reg_info, origin_data, (origin_count * origin_extent));
-                    assert(0 == status);
+                    module->mpi1sdd_mem_reg_cache[module->mpi1sdd_mem_reg_cache_cnt - 1] = dpu_mpi1sdd_buffer_reg((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker,
+                                                    origin_data, (origin_count * origin_extent));
+                    assert(NULL != module->mpi1sdd_mem_reg_cache[module->mpi1sdd_mem_reg_cache_cnt - 1]);
+                    mem_reg_info = module->mpi1sdd_mem_reg_cache[module->mpi1sdd_mem_reg_cache_cnt - 1];
                 }
             }
-            
-            // printf("Origin addr: %p size: %d\n", origin_data, (origin_extent * origin_count));
         }
         fflush(stdout);
         {
-            // Add op support in ACCUMULATE_REQ
             DPU_MPI1SDD_ACCUMULATE_REQ(status, in_buf, DPU_MPI1SDD_BUF_SIZE,
                         origin_rank, target_rank, win_id, total_target_disp, origin_count,
                         target_count, origin_dt, target_dt, is_inline_data, origin_data, 
                         mem_reg_info->rkey.addr_ptr, mem_reg_info->rkey.addr_len);
             assert(0 == status);
-            // Ensure the payload is sent completely
             status = dpu_mpi1sdd_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
                                         (void*)in_buf, DPU_OFFL_GET_SIZE(in_buf));
             assert(0 == status);
             module->mpi1sdd_ops_tracker[target] += 1;
-            // if (!is_inline_data)
-            // {
-            //     printf("Handling non-inline data\n");
-            //     status = dpu_mpi1sdd_tag_send((dpu_mpi1sdd_worker_t *)mca_osc_ucx_component.dpu_offl_worker, target_rank,
-            //                                     1, (void*)origin_data, (origin_count * origin_extent));
-            // }
-            // status = dpu_mpi1sdd_host_cmd_exec(mca_osc_ucx_component.dpu_offl_worker, target_rank, in_buf, out_buf, DPU_MPI1SDD_BUF_SIZE);
-            // assert(0 == status);
-            // assert(0 == DPU_MPI1SDD_MPIC_GET_RESP_STATUS(out_buf));
         }
 
     }
